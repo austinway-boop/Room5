@@ -429,12 +429,18 @@ app.put('/api/reservations/:id', async (req, res) => {
   );
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`WebSocket server running on ws://localhost:${config.server.wsPort}`);
-  console.log('\nTo use Google Calendar integration:');
-  console.log('1. Set up Google Cloud Console project');
-  console.log('2. Enable Calendar API');
-  console.log('3. Add credentials to .env file');
-  console.log('4. Visit http://localhost:3000 and click "Connect Google Calendar"');
-});
+// Only start the server if not in Vercel environment
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`WebSocket server running on ws://localhost:${config.server.wsPort}`);
+    console.log('\nTo use Google Calendar integration:');
+    console.log('1. Set up Google Cloud Console project');
+    console.log('2. Enable Calendar API');
+    console.log('3. Add credentials to .env file');
+    console.log('4. Visit http://localhost:3000 and click "Connect Google Calendar"');
+  });
+}
+
+// Export for Vercel
+module.exports = app;
