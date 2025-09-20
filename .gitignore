@@ -1,0 +1,22 @@
+node_modules/
+*.db
+public/calendars/*.ics
+.DS_Store
+npm-debug.log*
+
+# Environment and secrets - NEVER commit these!
+.env
+.env.local
+.env.production
+.env.development
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log
+
+# OS Files
+Thumbs.db
