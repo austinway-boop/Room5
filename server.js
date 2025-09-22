@@ -16,7 +16,12 @@ const PORT = config.server.port;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+
+// Serve static files (for local development)
+if (!process.env.VERCEL) {
+  app.use(express.static('public'));
+}
+
 app.use(session({
   secret: config.session.secret,
   resave: false,
@@ -31,8 +36,9 @@ const oauth2Client = new google.auth.OAuth2(
   config.google.redirectUri
 );
 
-// Database setup
-const db = new sqlite3.Database('./reservations.db');
+// Database setup (use /tmp in Vercel for temporary storage)
+const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
+const db = new sqlite3.Database(dbPath);
 
 // Create reservations table
 db.run(`
@@ -61,24 +67,32 @@ db.run(`
   )
 `);
 
-// WebSocket server for real-time updates
-const wss = new WebSocket.Server({ port: config.server.wsPort });
-
-const broadcast = (data) => {
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
-    }
-  });
+// WebSocket server for real-time updates (only in local development)
+let wss = null;
+let broadcast = (data) => {
+  // No-op in Vercel environment
+  console.log('WebSocket broadcast skipped in serverless environment:', data.type);
 };
 
-wss.on('connection', (ws) => {
-  console.log('New WebSocket connection');
+if (!process.env.VERCEL) {
+  wss = new WebSocket.Server({ port: config.server.wsPort });
   
-  ws.on('close', () => {
-    console.log('WebSocket connection closed');
+  broadcast = (data) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(data));
+      }
+    });
+  };
+
+  wss.on('connection', (ws) => {
+    console.log('New WebSocket connection');
+    
+    ws.on('close', () => {
+      console.log('WebSocket connection closed');
+    });
   });
-});
+}
 
 // Google Calendar Helper Functions
 async function createGoogleCalendarEvent(auth, reservation) {
@@ -140,6 +154,22 @@ async function deleteGoogleCalendarEvent(auth, eventId) {
 }
 
 // API Routes
+
+// Root route for Vercel (serve the main HTML)
+if (process.env.VERCEL) {
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
+  
+  // Serve static files explicitly in Vercel
+  app.get('/app.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'app.js'));
+  });
+  
+  app.get('/styles.css', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'styles.css'));
+  });
+}
 
 // Google Auth Routes
 app.get('/auth/google', (req, res) => {

@@ -1,6 +1,6 @@
 // Configuration
-const API_URL = 'http://localhost:3000/api';
-const WS_URL = 'ws://localhost:8080';
+const API_URL = window.location.hostname === 'localhost' ? 'http://localhost:3000/api' : '/api';
+const WS_URL = window.location.hostname === 'localhost' ? 'ws://localhost:8080' : null;
 
 // State
 let selectedDate = new Date();
@@ -382,28 +382,44 @@ async function deleteReservation(id) {
 
 // WebSocket Connection
 function initializeWebSocket() {
-    ws = new WebSocket(WS_URL);
-    
-    ws.onopen = () => {
-        console.log('WebSocket connected');
-        updateConnectionStatus(true);
-    };
-    
-    ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        handleWebSocketMessage(message);
-    };
-    
-    ws.onclose = () => {
-        console.log('WebSocket disconnected');
+    // Skip WebSocket in production (Vercel doesn't support it)
+    if (!WS_URL) {
+        console.log('WebSocket disabled in production environment');
         updateConnectionStatus(false);
-        // Reconnect after 3 seconds
-        setTimeout(initializeWebSocket, 3000);
-    };
+        // Poll for updates in production instead
+        setInterval(loadReservations, 10000); // Refresh every 10 seconds
+        return;
+    }
     
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-    };
+    try {
+        ws = new WebSocket(WS_URL);
+        
+        ws.onopen = () => {
+            console.log('WebSocket connected');
+            updateConnectionStatus(true);
+        };
+        
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            handleWebSocketMessage(message);
+        };
+        
+        ws.onclose = () => {
+            console.log('WebSocket disconnected');
+            updateConnectionStatus(false);
+            // Reconnect after 3 seconds
+            setTimeout(initializeWebSocket, 3000);
+        };
+        
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+    } catch (error) {
+        console.log('WebSocket not available:', error);
+        updateConnectionStatus(false);
+        // Fall back to polling
+        setInterval(loadReservations, 10000);
+    }
 }
 
 function handleWebSocketMessage(message) {
