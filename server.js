@@ -529,29 +529,33 @@ app.post('/api/reservations', async (req, res) => {
   console.log('Creating reservation - Session user:', req.session.user ? req.session.user.email : 'none');
   console.log('Session has tokens:', req.session.user && req.session.user.tokens ? 'yes' : 'no');
   
-  // Check session first, then database
-  let userTokens = req.session.user?.tokens;
+  // Always try to load from database first (Vercel sessions are unreliable)
+  let userTokens = null;
   
-  if (!userTokens) {
-    // Try to load from database
-    try {
-      const user = await new Promise((resolve, reject) => {
-        db.get(
-          'SELECT google_tokens FROM users ORDER BY created_at DESC LIMIT 1',
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
-      
-      if (user) {
-        userTokens = JSON.parse(user.google_tokens);
-        console.log('Loaded tokens from database for calendar creation');
-      }
-    } catch (error) {
-      console.error('Error loading user tokens from database:', error);
+  // Try to load from database
+  try {
+    const user = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT google_tokens, email FROM users ORDER BY created_at DESC LIMIT 1',
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        }
+      );
+    });
+    
+    if (user) {
+      userTokens = JSON.parse(user.google_tokens);
+      console.log('Loaded tokens from database for calendar creation for:', user.email);
     }
+  } catch (error) {
+    console.error('Error loading user tokens from database:', error);
+  }
+  
+  // Fallback to session if database doesn't have tokens
+  if (!userTokens && req.session.user?.tokens) {
+    userTokens = req.session.user.tokens;
+    console.log('Using tokens from session');
   }
   
   if (userTokens) {

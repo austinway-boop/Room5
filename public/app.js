@@ -20,8 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Remove auth parameter from URL
         window.history.replaceState({}, document.title, window.location.pathname);
         // Force auth status check after a short delay to ensure session is saved
-        setTimeout(() => {
-            checkAuthStatus();
+        setTimeout(async () => {
+            await checkAuthStatus();
+            // Double-check after another delay (Vercel session propagation)
+            setTimeout(() => {
+                checkAuthStatus();
+            }, 1000);
         }, 500);
     }
     if (urlParams.get('error') === 'auth_failed') {
@@ -40,6 +44,15 @@ document.addEventListener('DOMContentLoaded', () => {
 // Google Auth
 async function checkAuthStatus() {
     try {
+        // Check localStorage first for auth state
+        const savedAuth = localStorage.getItem('googleAuth');
+        if (savedAuth) {
+            const authData = JSON.parse(savedAuth);
+            isGoogleAuthenticated = true;
+            currentUser = authData;
+            updateAuthButton();
+        }
+        
         const response = await fetch('/auth/status', {
             credentials: 'include' // Ensure cookies are sent
         });
@@ -49,6 +62,13 @@ async function checkAuthStatus() {
         
         isGoogleAuthenticated = data.authenticated;
         currentUser = data.user;
+        
+        // Save to localStorage if authenticated
+        if (data.authenticated && data.user) {
+            localStorage.setItem('googleAuth', JSON.stringify(data.user));
+        } else if (!data.authenticated) {
+            localStorage.removeItem('googleAuth');
+        }
         
         updateAuthButton();
     } catch (error) {
@@ -80,6 +100,7 @@ async function handleGoogleAuth() {
                 });
                 isGoogleAuthenticated = false;
                 currentUser = null;
+                localStorage.removeItem('googleAuth');
                 updateAuthButton();
             } catch (error) {
                 console.error('Logout error:', error);
@@ -464,6 +485,15 @@ function handleWebSocketMessage(message) {
 }
 
 function updateConnectionStatus(connected) {
+    const statusElement = document.getElementById('connectionStatus');
+    if (!statusElement) return;
+    
+    // Hide connection status in production (WebSockets don't work on Vercel)
+    if (window.location.hostname !== 'localhost') {
+        statusElement.style.display = 'none';
+        return;
+    }
+    
     const statusDot = document.querySelector('.status-dot');
     const statusText = document.querySelector('.status-text');
     
