@@ -80,8 +80,11 @@ db.serialize(() => {
 });
 
 // Custom SQLite session store for Vercel
-class SQLiteStore {
+const Store = session.Store || session.session.Store;
+
+class SQLiteStore extends Store {
   constructor(db) {
+    super();
     this.db = db;
   }
 
@@ -106,12 +109,12 @@ class SQLiteStore {
     this.db.run(
       'INSERT OR REPLACE INTO sessions (sid, sess, expire) VALUES (?, ?, ?)',
       [sid, sessJson, expire],
-      callback
+      callback || (() => {})
     );
   }
 
   destroy(sid, callback) {
-    this.db.run('DELETE FROM sessions WHERE sid = ?', [sid], callback);
+    this.db.run('DELETE FROM sessions WHERE sid = ?', [sid], callback || (() => {}));
   }
 
   touch(sid, sess, callback) {
@@ -119,8 +122,19 @@ class SQLiteStore {
     this.db.run(
       'UPDATE sessions SET expire = ? WHERE sid = ?',
       [expire, sid],
-      callback
+      callback || (() => {})
     );
+  }
+
+  all(callback) {
+    this.db.all('SELECT * FROM sessions WHERE expire > ?', [Date.now()], (err, rows) => {
+      if (err) return callback(err);
+      callback(null, rows || []);
+    });
+  }
+
+  clear(callback) {
+    this.db.run('DELETE FROM sessions', callback || (() => {}));
   }
 }
 
@@ -128,12 +142,7 @@ class SQLiteStore {
 const sessionStore = new SQLiteStore(db);
 
 app.use(session({
-  store: {
-    get: (sid, cb) => sessionStore.get(sid, cb),
-    set: (sid, sess, cb) => sessionStore.set(sid, sess, cb),
-    destroy: (sid, cb) => sessionStore.destroy(sid, cb),
-    touch: (sid, sess, cb) => sessionStore.touch(sid, sess, cb)
-  },
+  store: sessionStore,
   secret: config.session.secret,
   resave: false,
   saveUninitialized: false,
