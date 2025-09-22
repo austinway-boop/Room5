@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isGoogleAuthenticated = true;
             currentUser = { email: decodeURIComponent(userEmail) };
             updateAuthButton();
+            hideAuthOverlay();
         }
         
         // Don't show the popup - just log success
@@ -48,7 +49,16 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeDateSelector();
     initializeForm();
     initializeWebSocket();
-    checkAuthStatus();
+    
+    // Check auth and show overlay if not authenticated
+    checkAuthStatus().then(() => {
+        if (!isGoogleAuthenticated) {
+            showAuthOverlay();
+        } else {
+            hideAuthOverlay();
+        }
+    });
+    
     loadReservations();
     generateTimeline();
 });
@@ -95,12 +105,15 @@ async function checkAuthStatus() {
         
         updateAuthButton();
         
-        // If authenticated, ensure we're showing the right UI
+        // Hide auth overlay if authenticated
         if (isGoogleAuthenticated) {
+            hideAuthOverlay();
             // Remove any auth success messages from URL
             if (window.location.search.includes('auth=success')) {
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
+        } else {
+            showAuthOverlay();
         }
     } catch (error) {
         console.error('Error checking auth status:', error);
@@ -295,6 +308,13 @@ function updateDurationDisplay() {
 }
 
 async function handleReservationSubmit() {
+    // Check if user is authenticated before allowing reservation
+    if (!isGoogleAuthenticated) {
+        alert('Please connect your Google Calendar first to make a reservation.');
+        showAuthOverlay();
+        return;
+    }
+    
     const form = document.getElementById('reservationForm');
     const formData = new FormData(form);
     
@@ -474,7 +494,14 @@ function displayReservations() {
 
 // Delete Reservation
 async function deleteReservation(id) {
-    if (!confirm('Are you sure you want to cancel this reservation?')) {
+    // Check if user is authenticated before allowing deletion
+    if (!isGoogleAuthenticated) {
+        alert('Please connect your Google Calendar first to cancel reservations.');
+        showAuthOverlay();
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to cancel this reservation? This will also remove it from Google Calendar.')) {
         return;
     }
     
@@ -485,13 +512,23 @@ async function deleteReservation(id) {
         });
         
         if (!response.ok) {
-            throw new Error('Failed to delete reservation');
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to delete reservation');
         }
         
-        loadReservations();
+        const result = await response.json();
+        console.log('Deletion result:', result);
+        
+        // Reload reservations
+        await loadReservations();
+        
+        // Show success message
+        if (result.message) {
+            console.log('✅', result.message);
+        }
     } catch (error) {
         console.error('Error deleting reservation:', error);
-        alert('Failed to cancel reservation. Please try again.');
+        alert('Failed to cancel reservation: ' + error.message);
     }
 }
 
@@ -629,4 +666,81 @@ function showSuccessModal(reservation) {
 
 function closeSuccessModal() {
     document.getElementById('successModal').classList.remove('show');
+}
+
+// Auth overlay functions
+function showAuthOverlay() {
+    // Create overlay if it doesn't exist
+    let overlay = document.getElementById('authOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'authOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: white;
+            padding: 3rem;
+            border-radius: 1rem;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        `;
+        
+        content.innerHTML = `
+            <h2 style="margin-bottom: 1rem; color: #1F2937;">Google Calendar Required</h2>
+            <p style="margin-bottom: 2rem; color: #6B7280; line-height: 1.5;">
+                To use the Film Room reservation system, you must connect your Google Calendar.
+                This allows us to automatically create calendar events for your reservations.
+            </p>
+            <button onclick="handleGoogleAuth()" style="
+                background: #10B981;
+                color: white;
+                border: none;
+                padding: 1rem 2rem;
+                border-radius: 0.5rem;
+                font-size: 1.1rem;
+                font-weight: 600;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                transition: all 0.3s;
+            " onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10B981'">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Connect Google Calendar
+            </button>
+            <p style="margin-top: 1.5rem; font-size: 0.875rem; color: #9CA3AF;">
+                Your calendar data is secure and only used for reservation management.
+            </p>
+        `;
+        
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+    }
+    
+    overlay.style.display = 'flex';
+}
+
+function hideAuthOverlay() {
+    const overlay = document.getElementById('authOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
 }

@@ -928,12 +928,21 @@ app.delete('/api/reservations/:id', async (req, res) => {
   try {
     let reservation = null;
     
-    // Get reservation from Redis
+    // Get reservation from Redis first
     if (redis) {
-      const data = await redis.get(`reservation:${id}`);
-      if (data) {
-        reservation = JSON.parse(data);
+      try {
+        const data = await redis.get(`reservation:${id}`);
+        if (data) {
+          reservation = typeof data === 'string' ? JSON.parse(data) : data;
+        }
+      } catch (err) {
+        console.error('Redis get error:', err);
       }
+    }
+    
+    // Fall back to memory store if not in Redis
+    if (!reservation && memoryStore.reservations.has(id)) {
+      reservation = memoryStore.reservations.get(id);
     }
     
     if (!reservation) {
@@ -944,42 +953,75 @@ app.delete('/api/reservations/:id', async (req, res) => {
     // Try to delete from Google Calendar if event exists
     if (reservation.googleEventId) {
       let userTokens = null;
+      let calendarOwnerEmail = null;
       
-      if (redis) {
+      // 1. Try session first (most reliable)
+      if (req.session.user?.tokens) {
+        userTokens = req.session.user.tokens;
+        calendarOwnerEmail = req.session.user.email;
+        console.log('Using tokens from session for deletion:', calendarOwnerEmail);
+      }
+      
+      // 2. Try memory store if no session
+      if (!userTokens && memoryStore.latestUser) {
+        const userData = memoryStore.users.get(memoryStore.latestUser);
+        if (userData && userData.google_tokens) {
+          userTokens = userData.google_tokens;
+          calendarOwnerEmail = userData.email;
+          console.log('Using tokens from memory store for deletion:', calendarOwnerEmail);
+        }
+      }
+      
+      // 3. Try Redis as last resort
+      if (!userTokens && redis) {
         try {
           const latestUserEmail = await redis.get('latest_user');
           if (latestUserEmail) {
             const userData = await redis.get(`user:${latestUserEmail}`);
             if (userData) {
-              const user = JSON.parse(userData);
+              const user = typeof userData === 'string' ? JSON.parse(userData) : userData;
               userTokens = user.google_tokens;
+              calendarOwnerEmail = user.email;
+              console.log('Using tokens from Redis for deletion:', calendarOwnerEmail);
             }
           }
         } catch (error) {
-          console.error('Error loading user tokens from Redis:', error);
+          console.error('Error loading user tokens from Redis:', error.message);
         }
-      }
-      
-      if (!userTokens && req.session.user?.tokens) {
-        userTokens = req.session.user.tokens;
       }
       
       if (userTokens) {
         try {
+          console.log('Attempting to delete Google Calendar event:', reservation.googleEventId);
           oauth2Client.setCredentials(userTokens);
           await deleteGoogleCalendarEvent(oauth2Client, reservation.googleEventId);
-          console.log('Google Calendar event deleted:', reservation.googleEventId);
+          console.log('✅ Google Calendar event deleted successfully');
         } catch (error) {
-          console.error('Failed to delete Google Calendar event:', error);
+          console.error('❌ Failed to delete Google Calendar event:', error.message);
+          if (error.code === 404) {
+            console.log('Event already deleted from Google Calendar');
+          }
           // Continue with local deletion even if Google Calendar fails
         }
+      } else {
+        console.log('⚠️ No authenticated user found - cannot delete from Google Calendar');
       }
     }
     
     // Delete from Redis
     if (redis) {
-      await redis.del(`reservation:${id}`);
-      console.log('Reservation deleted from Redis:', id);
+      try {
+        await redis.del(`reservation:${id}`);
+        console.log('Reservation deleted from Redis:', id);
+      } catch (err) {
+        console.error('Redis delete error:', err);
+      }
+    }
+    
+    // Delete from memory store
+    if (memoryStore.reservations.has(id)) {
+      memoryStore.reservations.delete(id);
+      console.log('Reservation deleted from memory store:', id);
     }
     
     // Broadcast deletion
@@ -988,7 +1030,7 @@ app.delete('/api/reservations/:id', async (req, res) => {
       data: { id }
     });
     
-    res.json({ success: true });
+    res.json({ success: true, message: 'Reservation cancelled successfully' });
   } catch (error) {
     console.error('Error deleting reservation:', error);
     res.status(500).json({ error: error.message });
