@@ -37,6 +37,15 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Set Content Security Policy headers (optional, for security)
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://room5.vercel.app"
+  );
+  next();
+});
+
 // Serve static files
 if (!process.env.VERCEL) {
   // Local development - use express.static
