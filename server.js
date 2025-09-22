@@ -349,11 +349,11 @@ async function createGoogleCalendarEvent(auth, reservation) {
     description: `Reserved by: ${reservation.name}\nEmail: ${reservation.email}\n${reservation.purpose ? `Purpose: ${reservation.purpose}` : 'Film Room reservation'}\n\nThis is your confirmed reservation for The Film Room (Room 5).`,
     start: {
       dateTime: moment(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
-      timeZone: 'America/Los_Angeles',
+      timeZone: 'America/Chicago', // CST timezone
     },
     end: {
       dateTime: moment(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
-      timeZone: 'America/Los_Angeles',
+      timeZone: 'America/Chicago', // CST timezone
     },
     attendees: attendees,
     reminders: {

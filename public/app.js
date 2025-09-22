@@ -451,7 +451,7 @@ function displayReservations() {
     container.innerHTML = reservations.map(reservation => `
         <div class="reservation-card" data-id="${reservation.id}">
             <div class="reservation-header">
-                <span class="reservation-time">${reservation.startTime} - ${reservation.endTime}</span>
+                <span class="reservation-time">${reservation.startTime} - ${reservation.endTime} CST</span>
                 <span class="reservation-duration">${reservation.duration} min</span>
             </div>
             <div class="reservation-body">
