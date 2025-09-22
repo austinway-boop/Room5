@@ -11,6 +11,18 @@ let currentUser = null;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    // Check for auth callback
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'success') {
+        console.log('Auth successful, checking status...');
+        // Remove auth parameter from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    if (urlParams.get('error') === 'auth_failed') {
+        alert('Failed to connect Google Calendar. Please try again.');
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    
     initializeDateSelector();
     initializeForm();
     initializeWebSocket();
@@ -22,8 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // Google Auth
 async function checkAuthStatus() {
     try {
-        const response = await fetch('/auth/status');
+        const response = await fetch('/auth/status', {
+            credentials: 'include' // Ensure cookies are sent
+        });
         const data = await response.json();
+        
+        console.log('Auth status response:', data);
         
         isGoogleAuthenticated = data.authenticated;
         currentUser = data.user;
@@ -202,6 +218,7 @@ async function handleReservationSubmit() {
         const availabilityResponse = await fetch(`${API_URL}/check-availability`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(reservation)
         });
         
@@ -216,6 +233,7 @@ async function handleReservationSubmit() {
         const response = await fetch(`${API_URL}/reservations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(reservation)
         });
         

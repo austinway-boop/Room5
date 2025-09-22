@@ -36,8 +36,13 @@ if (!process.env.VERCEL) {
 app.use(session({
   secret: config.session.secret,
   resave: false,
-  saveUninitialized: true,
-  cookie: { secure: false } // Set to true in production with HTTPS
+  saveUninitialized: false,
+  cookie: { 
+    secure: process.env.VERCEL ? true : false, // Use secure cookies in production
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 // Google OAuth2 Configuration
@@ -235,14 +240,17 @@ app.get('/auth/google', (req, res) => {
 
 app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
+  console.log('OAuth callback received with code:', code ? 'present' : 'missing');
   
   try {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
+    console.log('OAuth tokens obtained successfully');
     
     // Get user info
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const userInfo = await oauth2.userinfo.get();
+    console.log('User info retrieved:', userInfo.data.email);
     
     // Store user and tokens in database
     const userId = uuidv4();
@@ -251,7 +259,7 @@ app.get('/auth/google/callback', async (req, res) => {
       [userId, userInfo.data.email, userInfo.data.name, JSON.stringify(tokens)],
       (err) => {
         if (err) {
-          console.error('Error saving user:', err);
+          console.error('Error saving user to database:', err);
           res.redirect('/?error=auth_failed');
           return;
         }
@@ -264,7 +272,15 @@ app.get('/auth/google/callback', async (req, res) => {
           tokens: tokens
         };
         
-        res.redirect('/?auth=success');
+        // Force session save before redirect
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('Session save error:', saveErr);
+          } else {
+            console.log('Session saved successfully for:', userInfo.data.email);
+          }
+          res.redirect('/?auth=success');
+        });
       }
     );
   } catch (error) {
@@ -274,6 +290,9 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.get('/auth/status', (req, res) => {
+  console.log('Auth status check - Session ID:', req.sessionID);
+  console.log('Auth status check - User in session:', req.session.user ? req.session.user.email : 'none');
+  
   res.json({
     authenticated: !!req.session.user,
     user: req.session.user ? {
@@ -359,8 +378,12 @@ app.post('/api/reservations', async (req, res) => {
   let googleEventId = null;
   
   // Try to create Google Calendar event if user is authenticated
+  console.log('Creating reservation - Session user:', req.session.user ? req.session.user.email : 'none');
+  console.log('Session has tokens:', req.session.user && req.session.user.tokens ? 'yes' : 'no');
+  
   if (req.session.user && req.session.user.tokens) {
     try {
+      console.log('Setting OAuth credentials for calendar event creation');
       oauth2Client.setCredentials(req.session.user.tokens);
       const googleEvent = await createGoogleCalendarEvent(oauth2Client, {
         name,
@@ -371,10 +394,14 @@ app.post('/api/reservations', async (req, res) => {
         purpose
       });
       googleEventId = googleEvent.id;
+      console.log('Google Calendar event created successfully:', googleEventId);
     } catch (error) {
-      console.error('Failed to create Google Calendar event:', error);
+      console.error('Failed to create Google Calendar event:', error.message);
+      console.error('Error details:', error);
       // Continue without Google Calendar integration
     }
+  } else {
+    console.log('No authenticated user or tokens in session - skipping calendar creation');
   }
   
   db.run(
