@@ -6,12 +6,12 @@ require('dotenv').config();
 
 // Auto-detect the correct redirect URI based on environment
 const getRedirectUri = () => {
-    if (process.env.VERCEL_URL) {
+    // ALWAYS prefer explicitly set redirect URI
+    if (process.env.GOOGLE_REDIRECT_URI) {
+        return process.env.GOOGLE_REDIRECT_URI;
+    } else if (process.env.VERCEL_URL) {
         // Running on Vercel - use the deployment URL
         return `https://${process.env.VERCEL_URL}/auth/google/callback`;
-    } else if (process.env.GOOGLE_REDIRECT_URI) {
-        // Use explicitly set redirect URI if available
-        return process.env.GOOGLE_REDIRECT_URI;
     } else {
         // Local development
         return 'http://localhost:3000/auth/google/callback';
