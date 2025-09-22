@@ -36,29 +36,18 @@
                     <p class="booking-description">Room 5 Booking System</p>
                 </div>
 
-                <div class="booking-info">
-                    <div class="info-card compact">
-                        <div class="info-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <path d="M12 6v6l4 2"></path>
+                <!-- Upcoming Reservations -->
+                <div class="upcoming-reservations-section">
+                    <div class="panel-header">
+                        <h3>Your Upcoming Reservations</h3>
+                        <button class="refresh-btn-small" onclick="loadUpcomingReservations()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                             </svg>
-                        </div>
-                        <div class="info-content">
-                            <p><strong>Hours:</strong> Mon-Fri, 12-8pm</p>
-                        </div>
+                        </button>
                     </div>
-
-                    <div class="info-card compact">
-                        <div class="info-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                                <circle cx="12" cy="10" r="3"></circle>
-                            </svg>
-                        </div>
-                        <div class="info-content">
-                            <p><strong>Location:</strong> Room 5</p>
-                        </div>
+                    <div id="upcomingReservationsList" class="upcoming-reservations-list">
+                        <!-- Upcoming reservations will be displayed here -->
                     </div>
                 </div>
 

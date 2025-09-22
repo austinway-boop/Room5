@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 await loadAllReservations();
                 generateCalendar();
                 await loadReservations(); // Show today's reservations
+                await loadUpcomingReservations(); // Load upcoming reservations
                 isDataLoaded = true;
             }
         }, 100);
@@ -72,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await loadAllReservations();
             generateCalendar();
             await loadReservations(); // Show today's reservations even when not authenticated
+            await loadUpcomingReservations(); // Try to load upcoming (will show sign-in message)
             hideLoadingScreen();
         } else {
             hideAuthOverlay();
@@ -80,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
             generateCalendar();
             // Load and display today's reservations in the side panel
             await loadReservations(); // This shows today's reservations
+            await loadUpcomingReservations(); // Load user's upcoming reservations
             isDataLoaded = true;
             hideLoadingScreen();
         }
@@ -672,6 +675,7 @@ async function handleReservationSubmit() {
         } else {
             await loadReservations();
         }
+        await loadUpcomingReservations(); // Refresh upcoming reservations
         hideLoadingScreen();
         
     } catch (error) {
@@ -709,6 +713,114 @@ async function loadReservations() {
     // Load today's reservations by default
     const today = new Date();
     await loadReservationsForDate(today);
+}
+
+// Load upcoming reservations for the current user
+async function loadUpcomingReservations() {
+    try {
+        const container = document.getElementById('upcomingReservationsList');
+        
+        if (!currentUser || !currentUser.email) {
+            container.innerHTML = '<div class="empty-state-compact">Sign in to see your upcoming reservations</div>';
+            return;
+        }
+        
+        // Fetch all reservations
+        const response = await fetch(`${API_URL}/reservations`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            container.innerHTML = '<div class="empty-state-compact">Failed to load reservations</div>';
+            return;
+        }
+        
+        const allReservations = await response.json();
+        
+        // Filter for current user's future reservations
+        const now = new Date();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const myFutureReservations = allReservations.filter(r => {
+            // Check if it's the user's reservation
+            if (!r.email || r.email.toLowerCase() !== currentUser.email.toLowerCase()) {
+                return false;
+            }
+            
+            // Parse the reservation date and time
+            const resDate = new Date(r.date + 'T' + r.startTime);
+            
+            // Include today's reservations if they haven't happened yet
+            if (r.date === formatDate(today)) {
+                // Check if the reservation time is in the future
+                const [hours, minutes] = r.startTime.split(':').map(Number);
+                const resTime = new Date();
+                resTime.setHours(hours, minutes, 0, 0);
+                return resTime > now;
+            }
+            
+            // Include all future dates
+            return resDate > today;
+        });
+        
+        // Sort by date and time
+        myFutureReservations.sort((a, b) => {
+            const dateCompare = a.date.localeCompare(b.date);
+            if (dateCompare !== 0) return dateCompare;
+            return a.startTime.localeCompare(b.startTime);
+        });
+        
+        if (myFutureReservations.length === 0) {
+            container.innerHTML = '<div class="empty-state-compact">No upcoming reservations</div>';
+            return;
+        }
+        
+        // Group reservations by date
+        const groupedReservations = {};
+        myFutureReservations.forEach(r => {
+            if (!groupedReservations[r.date]) {
+                groupedReservations[r.date] = [];
+            }
+            groupedReservations[r.date].push(r);
+        });
+        
+        // Create HTML for grouped reservations
+        let html = '';
+        Object.keys(groupedReservations).forEach(date => {
+            const dateObj = new Date(date + 'T12:00:00');
+            const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+            const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            
+            html += `
+                <div class="upcoming-date-group">
+                    <div class="upcoming-date-header">${dayName}, ${monthDay}</div>
+                    ${groupedReservations[date].map(r => `
+                        <div class="upcoming-reservation-card" data-id="${r.id}">
+                            <div class="upcoming-time">
+                                ${convertTo12Hour(r.startTime)}
+                            </div>
+                            <div class="upcoming-details">
+                                <div class="upcoming-duration">${r.duration} min</div>
+                                ${r.purpose ? `<div class="upcoming-purpose">${r.purpose}</div>` : ''}
+                            </div>
+                            <button class="btn-delete-compact" onclick="deleteReservation('${r.id}')" title="Cancel">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                    <path d="M18 6L6 18M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading upcoming reservations:', error);
+        document.getElementById('upcomingReservationsList').innerHTML = 
+            '<div class="empty-state-compact">Error loading reservations</div>';
+    }
 }
 
 async function refreshCurrentReservations() {
@@ -890,6 +1002,7 @@ async function performDeleteReservation(id) {
         // Reload reservations
         await loadAllReservations();
         await loadReservations();
+        await loadUpcomingReservations(); // Refresh upcoming reservations
         
         // Update calendar and time slots
         generateCalendar();
