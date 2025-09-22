@@ -744,35 +744,55 @@ app.post('/api/check-availability', async (req, res) => {
   
   try {
     let conflicts = [];
+    let allReservations = [];
     
+    // Get all reservations from Redis or memory store
     if (redis) {
-      // Get all reservations for the date
-      const keys = await redis.keys('reservation:*');
-      
-      if (keys && keys.length > 0) {
-        for (const key of keys) {
-          const data = await redis.get(key);
-          if (data) {
-            const reservation = JSON.parse(data);
-            
-            if (reservation.date === date && reservation.id !== excludeId) {
-              // Check for time overlap (parse as CST)
-              const reqStart = moment.tz(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
-              const reqEnd = moment.tz(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
-              const resStart = moment.tz(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
-              const resEnd = moment.tz(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
-              
-              // Only check for TIME conflicts, not who booked it
-              // This allows the same person to book multiple non-overlapping slots
-              // Allow back-to-back bookings (one ends exactly when another starts)
-              // Use <= and >= to exclude exact boundary matches
-              if (reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart)) {
-                // Additional check: if one ends exactly when another starts, it's OK
-                if (!(reqStart.isSame(resEnd) || reqEnd.isSame(resStart))) {
-                  conflicts.push(reservation);
-                }
+      try {
+        // Get all reservations for the date from Redis
+        const keys = await redis.keys('reservation:*');
+        
+        if (keys && keys.length > 0) {
+          for (const key of keys) {
+            const data = await redis.get(key);
+            if (data) {
+              const reservation = typeof data === 'string' ? JSON.parse(data) : data;
+              if (reservation.date === date) {
+                allReservations.push(reservation);
               }
             }
+          }
+        }
+      } catch (redisError) {
+        console.error('Redis error in availability check, using memory fallback:', redisError.message);
+        // Fall back to memory store
+        allReservations = Array.from(memoryStore.reservations.values()).filter(
+          r => r.date === date
+        );
+      }
+    } else {
+      // Use memory store if Redis not available
+      allReservations = Array.from(memoryStore.reservations.values()).filter(
+        r => r.date === date
+      );
+    }
+    
+    // Check for conflicts
+    for (const reservation of allReservations) {
+      if (reservation.id !== excludeId) {
+        // Check for time overlap (parse as CST)
+        const reqStart = moment.tz(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+        const reqEnd = moment.tz(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+        const resStart = moment.tz(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+        const resEnd = moment.tz(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+        
+        // Only check for TIME conflicts, not who booked it
+        // This allows the same person to book multiple non-overlapping slots
+        // Allow back-to-back bookings (one ends exactly when another starts)
+        if (reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart)) {
+          // Additional check: if one ends exactly when another starts, it's OK
+          if (!(reqStart.isSame(resEnd) || reqEnd.isSame(resStart))) {
+            conflicts.push(reservation);
           }
         }
       }

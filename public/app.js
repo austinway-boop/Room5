@@ -765,22 +765,33 @@ function displayReservations(dayReservations, date) {
     displayDate.setHours(0, 0, 0, 0);
     const isPast = displayDate < today;
     
-    if (dayReservations.length === 0) {
-        container.innerHTML = '<div class="empty-state-compact">No reservations</div>';
-        return;
+    // Separate my reservations from all reservations
+    let myReservations = [];
+    let otherReservations = [];
+    
+    if (currentUser && currentUser.email) {
+        myReservations = dayReservations.filter(r => 
+            r.email && r.email.toLowerCase() === currentUser.email.toLowerCase()
+        );
+        otherReservations = dayReservations.filter(r => 
+            !r.email || r.email.toLowerCase() !== currentUser.email.toLowerCase()
+        );
+    } else {
+        otherReservations = dayReservations;
     }
     
-    container.innerHTML = dayReservations.map(reservation => `
+    // Helper function to create reservation HTML
+    const createReservationHTML = (reservation, showEmail = true) => `
         <div class="reservation-card-compact ${isPast ? 'past-reservation' : ''}" data-id="${reservation.id}">
             <div class="reservation-time-block">
                 <span class="reservation-time-compact">${convertTo12Hour(reservation.startTime)}</span>
                 <span class="reservation-duration-compact">${reservation.duration}m</span>
             </div>
             <div class="reservation-info-compact">
-                <div class="reservation-name-compact">${reservation.name}</div>
+                <div class="reservation-name-compact">${reservation.name}${showEmail && reservation.email && currentUser && reservation.email.toLowerCase() !== currentUser.email.toLowerCase() ? ` <span style="color: #666; font-size: 0.75rem;">(${reservation.email})</span>` : ''}</div>
                 ${reservation.purpose ? `<div class="reservation-purpose-compact">${reservation.purpose}</div>` : ''}
             </div>
-            ${!isPast ? `
+            ${!isPast && currentUser && reservation.email && reservation.email.toLowerCase() === currentUser.email.toLowerCase() ? `
                 <button class="btn-delete-compact" onclick="deleteReservation('${reservation.id}')" title="Cancel">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                         <path d="M18 6L6 18M6 6l12 12"></path>
@@ -788,7 +799,41 @@ function displayReservations(dayReservations, date) {
                 </button>
             ` : '<div style="width: 14px;"></div>'}
         </div>
-    `).join('');
+    `;
+    
+    let html = '';
+    
+    // Add My Reservations section if user is logged in and has reservations
+    if (currentUser && myReservations.length > 0) {
+        html += `
+            <div style="margin-bottom: 1rem;">
+                <h4 style="font-size: 0.875rem; font-weight: 600; color: #006a4e; margin-bottom: 0.5rem; padding: 0 0.5rem;">My Reservations</h4>
+                ${myReservations.map(r => createReservationHTML(r, false)).join('')}
+            </div>
+        `;
+    }
+    
+    // Add Other Reservations section if there are any
+    if (otherReservations.length > 0) {
+        if (myReservations.length > 0) {
+            html += `
+                <div style="margin-top: 1rem;">
+                    <h4 style="font-size: 0.875rem; font-weight: 600; color: #333; margin-bottom: 0.5rem; padding: 0 0.5rem;">Other Reservations</h4>
+                    ${otherReservations.map(r => createReservationHTML(r, true)).join('')}
+                </div>
+            `;
+        } else {
+            // If no "My Reservations", just show all without a header
+            html = otherReservations.map(r => createReservationHTML(r, true)).join('');
+        }
+    }
+    
+    // Show empty state if no reservations at all
+    if (dayReservations.length === 0) {
+        html = '<div class="empty-state-compact">No reservations</div>';
+    }
+    
+    container.innerHTML = html;
 }
 
 // Delete Reservation

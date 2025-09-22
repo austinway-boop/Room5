@@ -291,6 +291,31 @@ body {
     border-color: var(--border-medium);
 }
 
+/* My Reservations section */
+.my-reservations-section {
+    margin-bottom: 1rem;
+}
+
+.my-reservations-header {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--calendly-green);
+    margin-bottom: 0.5rem;
+    padding: 0 0.5rem;
+}
+
+.other-reservations-section {
+    margin-top: 1rem;
+}
+
+.other-reservations-header {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    padding: 0 0.5rem;
+}
+
 .reservation-time-block {
     display: flex;
     flex-direction: column;
