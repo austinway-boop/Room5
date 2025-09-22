@@ -281,6 +281,16 @@ body {
     border-color: var(--calendly-green-light);
 }
 
+.reservation-card-compact.past-reservation {
+    opacity: 0.7;
+    background: #fafafa;
+}
+
+.reservation-card-compact.past-reservation:hover {
+    background: #f5f5f5;
+    border-color: var(--border-medium);
+}
+
 .reservation-time-block {
     display: flex;
     flex-direction: column;
@@ -423,6 +433,22 @@ body {
     color: var(--text-muted);
     cursor: not-allowed;
     background: var(--bg-secondary);
+}
+
+.calendar-day.past-date {
+    color: var(--text-secondary);
+    background: #fafafa;
+    cursor: pointer;
+}
+
+.calendar-day.past-date:hover {
+    background: var(--calendly-green-lighter);
+    border-color: var(--calendly-green-light);
+}
+
+.calendar-day.past-date.selected {
+    background: var(--calendly-green);
+    color: white;
 }
 
 .calendar-day.weekend {

@@ -45,7 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (urlParams.get('error') === 'auth_failed') {
         const details = urlParams.get('details');
-        alert('❌ Failed to connect Google Calendar. ' + (details ? 'Error: ' + decodeURIComponent(details) : 'Please try again.'));
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            showNotification('Failed to connect Google Calendar. ' + (details ? 'Error: ' + decodeURIComponent(details) : 'Please try again.'), 'error');
+        }, 100);
         window.history.replaceState({}, document.title, window.location.pathname);
     }
     
@@ -280,13 +283,18 @@ function createCalendarDay(day, monthOffset) {
     
     const dayOfWeek = date.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;  // Sunday = 0, Saturday = 6
+    const isPast = date < today;
     
-    if (date < today || isWeekend) {
+    // Mark weekends as disabled
+    if (isWeekend) {
         dayEl.classList.add('disabled');
-        if (isWeekend) {
-            dayEl.classList.add('weekend');
-        }
+        dayEl.classList.add('weekend');
     } else {
+        // Mark past dates differently but still clickable for viewing
+        if (isPast) {
+            dayEl.classList.add('past-date');
+        }
+        
         if (date.getTime() === today.getTime()) {
             dayEl.classList.add('today');
         }
@@ -300,7 +308,7 @@ function createCalendarDay(day, monthOffset) {
             dayEl.classList.add('has-reservations');
         }
         
-        // Add click handler (only for weekdays)
+        // Add click handler for all weekdays (including past dates for viewing)
         dayEl.addEventListener('click', () => selectDate(date));
     }
     
@@ -317,7 +325,7 @@ function selectDate(date) {
     generateCalendar();
     updateSelectedDateDisplay();
     generateTimeSlots();
-    loadReservations();
+    loadReservationsForDate(date);
 }
 
 function updateSelectedDateDisplay() {
@@ -363,13 +371,34 @@ function generateTimeSlots() {
         return;
     }
     
+    // Check if selected date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkDate = new Date(selectedDate);
+    checkDate.setHours(0, 0, 0, 0);
+    
+    if (checkDate < today) {
+        container.innerHTML = `
+            <div class="no-date-selected">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 6v6"></path>
+                </svg>
+                <p>This is a past date</p>
+                <p style="font-size: 0.75rem; margin-top: 0.5rem;">View reservations in the left panel</p>
+            </div>
+        `;
+        return;
+    }
+    
     container.innerHTML = '';
     
     // Generate 30-minute slots from 12 PM (noon) to 8 PM for weekdays only
-    for (let hour = 12; hour <= 19; hour++) {
+    for (let hour = 12; hour <= 20; hour++) {
         for (let minutes = 0; minutes < 60; minutes += 30) {
-            // Don't create 8:00 PM slot (last slot should be 7:30 PM)
-            if (hour === 19 && minutes === 30) break;
+            // Stop after 7:30 PM slot (which ends at 8:00 PM)
+            if (hour === 20 && minutes === 0) break;
+            if (hour === 20 && minutes === 30) break;
             
             const startTime = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
             const endTime = minutes === 30 ? 
@@ -521,20 +550,20 @@ function initializeForm() {
 async function handleReservationSubmit() {
     // Check if user is authenticated before allowing reservation
     if (!isGoogleAuthenticated) {
-        alert('Please connect your Google Calendar first to make a reservation.');
+        showNotification('Please connect your Google Calendar first to make a reservation.', 'warning');
         showAuthOverlay();
         return;
     }
     
     // Check if data is loaded
     if (!isDataLoaded) {
-        alert('Please wait for the calendar to load completely.');
+        showNotification('Please wait for the calendar to load completely.', 'info');
         return;
     }
     
     // Check if date and time are selected
     if (!selectedDate || !selectedTimeSlot) {
-        alert('Please select a date and time for your reservation.');
+        showNotification('Please select a date and time for your reservation.', 'warning');
         return;
     }
     
@@ -596,7 +625,7 @@ async function handleReservationSubmit() {
         
     } catch (error) {
         console.error('Error creating reservation:', error);
-        alert('Failed to create reservation. Please try again.');
+        showNotification('Failed to create reservation. Please try again.', 'error');
     }
 }
 
@@ -631,10 +660,25 @@ async function loadAllReservations() {
 }
 
 async function loadReservations() {
-    // Load today's reservations for the summary
+    // Load today's reservations by default
+    const today = new Date();
+    await loadReservationsForDate(today);
+}
+
+async function refreshCurrentReservations() {
+    // Refresh reservations for the currently displayed date
+    const headerElement = document.querySelector('.panel-header h3');
+    if (selectedDate) {
+        await loadReservationsForDate(selectedDate);
+    } else {
+        await loadReservations();
+    }
+}
+
+async function loadReservationsForDate(date) {
     try {
-        const today = new Date();
-        const response = await fetch(`${API_URL}/reservations?date=${formatDate(today)}`, {
+        const dateToLoad = date || new Date();
+        const response = await fetch(`${API_URL}/reservations?date=${formatDate(dateToLoad)}`, {
             credentials: 'include'
         });
         
@@ -642,8 +686,13 @@ async function loadReservations() {
             throw new Error('Failed to load reservations');
         }
         
-        const todayReservations = await response.json();
-        displayReservations(todayReservations);
+        const dayReservations = await response.json();
+        
+        // Update the panel header to show which date's reservations are displayed
+        updateReservationsPanelHeader(dateToLoad);
+        
+        // Display the reservations
+        displayReservations(dayReservations, dateToLoad);
         
         // Also update the time slots if a date is selected
         if (selectedDate) {
@@ -654,16 +703,45 @@ async function loadReservations() {
     }
 }
 
-function displayReservations(todayReservations) {
+function updateReservationsPanelHeader(date) {
+    const headerElement = document.querySelector('.panel-header h3');
+    if (headerElement) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
+        
+        let headerText = '';
+        if (date.getTime() === today.getTime()) {
+            headerText = "Today's Reservations";
+        } else if (date.getTime() === today.getTime() + 86400000) {
+            headerText = "Tomorrow's Reservations";
+        } else if (date.getTime() === today.getTime() - 86400000) {
+            headerText = "Yesterday's Reservations";
+        } else {
+            const options = { weekday: 'short', month: 'short', day: 'numeric' };
+            const dateStr = date.toLocaleDateString('en-US', options);
+            headerText = `Reservations - ${dateStr}`;
+        }
+        
+        headerElement.textContent = headerText;
+    }
+}
+
+function displayReservations(dayReservations, date) {
     const container = document.getElementById('reservationsList');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const displayDate = date || new Date();
+    displayDate.setHours(0, 0, 0, 0);
+    const isPast = displayDate < today;
     
-    if (todayReservations.length === 0) {
-        container.innerHTML = '<div class="empty-state-compact">No reservations yet</div>';
+    if (dayReservations.length === 0) {
+        container.innerHTML = '<div class="empty-state-compact">No reservations</div>';
         return;
     }
     
-    container.innerHTML = todayReservations.map(reservation => `
-        <div class="reservation-card-compact" data-id="${reservation.id}">
+    container.innerHTML = dayReservations.map(reservation => `
+        <div class="reservation-card-compact ${isPast ? 'past-reservation' : ''}" data-id="${reservation.id}">
             <div class="reservation-time-block">
                 <span class="reservation-time-compact">${convertTo12Hour(reservation.startTime)}</span>
                 <span class="reservation-duration-compact">${reservation.duration}m</span>
@@ -672,28 +750,30 @@ function displayReservations(todayReservations) {
                 <div class="reservation-name-compact">${reservation.name}</div>
                 ${reservation.purpose ? `<div class="reservation-purpose-compact">${reservation.purpose}</div>` : ''}
             </div>
-            <button class="btn-delete-compact" onclick="deleteReservation('${reservation.id}')" title="Cancel">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-                    <path d="M18 6L6 18M6 6l12 12"></path>
-                </svg>
-            </button>
+            ${!isPast ? `
+                <button class="btn-delete-compact" onclick="deleteReservation('${reservation.id}')" title="Cancel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                        <path d="M18 6L6 18M6 6l12 12"></path>
+                    </svg>
+                </button>
+            ` : '<div style="width: 14px;"></div>'}
         </div>
     `).join('');
 }
 
 // Delete Reservation
 async function deleteReservation(id) {
-    // Check if user is authenticated before allowing deletion
-    if (!isGoogleAuthenticated) {
-        alert('Please connect your Google Calendar first to cancel reservations.');
-        showAuthOverlay();
-        return;
-    }
-    
-    if (!confirm('Are you sure you want to cancel this reservation? This will also remove it from Google Calendar.')) {
-        return;
-    }
-    
+    // Show confirmation modal instead of browser confirm
+    showConfirmModal(
+        'Cancel Reservation',
+        'Are you sure you want to cancel this reservation? This will also remove it from Google Calendar.',
+        async () => {
+            await performDeleteReservation(id);
+        }
+    );
+}
+
+async function performDeleteReservation(id) {
     try {
         const response = await fetch(`${API_URL}/reservations/${id}`, {
             method: 'DELETE',
@@ -718,13 +798,11 @@ async function deleteReservation(id) {
             generateTimeSlots();
         }
         
-        // Show success message
-        if (result.message) {
-            console.log('✅', result.message);
-        }
+        // Show success notification instead of console log
+        showNotification('Reservation cancelled successfully', 'success');
     } catch (error) {
         console.error('Error deleting reservation:', error);
-        alert('Failed to cancel reservation: ' + error.message);
+        showNotification('Failed to cancel reservation: ' + error.message, 'error');
     }
 }
 
@@ -819,13 +897,18 @@ function showConflictModal(conflicts) {
     const modal = document.getElementById('conflictModal');
     const details = document.getElementById('conflictDetails');
     
+    // Handle cases where conflicts might not be an array
+    if (!conflicts || !Array.isArray(conflicts)) {
+        details.innerHTML = `<p>This time slot is not available.</p>`;
+    } else {
     details.innerHTML = conflicts.map(c => `
         <div style="margin-bottom: 1rem;">
             <strong>${c.name}</strong><br>
-            ${c.startTime} - ${c.endTime}<br>
+                ${convertTo12Hour(c.startTime)} - ${convertTo12Hour(c.endTime)}<br>
             ${c.purpose || 'No description'}
         </div>
     `).join('');
+    }
     
     modal.classList.add('show');
 }
@@ -1004,4 +1087,145 @@ function hideLoadingScreen() {
     if (loadingScreen) {
         loadingScreen.style.display = 'none';
     }
+}
+
+// UI Notification System
+function showNotification(message, type = 'info') {
+    // Remove any existing notifications
+    const existingNotif = document.querySelector('.notification-toast');
+    if (existingNotif) {
+        existingNotif.remove();
+    }
+    
+    // Create notification element
+    const notif = document.createElement('div');
+    notif.className = `notification-toast notification-${type}`;
+    notif.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 1rem 1.5rem;
+        background: ${type === 'error' ? '#fee2e2' : type === 'success' ? '#e7f5f0' : type === 'warning' ? '#fef3c7' : '#e0e7ff'};
+        color: ${type === 'error' ? '#dc2626' : type === 'success' ? '#006a4e' : type === 'warning' ? '#92400e' : '#3730a3'};
+        border: 1px solid ${type === 'error' ? '#dc2626' : type === 'success' ? '#006a4e' : type === 'warning' ? '#f59e0b' : '#6366f1'};
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        z-index: 10001;
+        max-width: 400px;
+        animation: slideIn 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    `;
+    
+    // Add icon
+    const icon = document.createElement('span');
+    icon.style.cssText = 'font-size: 1.25rem;';
+    icon.textContent = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+    
+    // Add message
+    const messageEl = document.createElement('span');
+    messageEl.textContent = message;
+    
+    // Add close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.cssText = `
+        margin-left: auto;
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: inherit;
+        padding: 0 0 0 1rem;
+    `;
+    closeBtn.onclick = () => notif.remove();
+    
+    notif.appendChild(icon);
+    notif.appendChild(messageEl);
+    notif.appendChild(closeBtn);
+    document.body.appendChild(notif);
+    
+    // Add animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (notif && notif.parentNode) {
+            notif.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notif.remove(), 300);
+        }
+    }, 5000);
+}
+
+// Confirmation Modal
+function showConfirmModal(title, message, onConfirm) {
+    // Create modal overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-modal-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    `;
+    
+    // Create modal content
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 400px;
+        width: 90%;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    `;
+    
+    modal.innerHTML = `
+        <h3 style="margin-bottom: 1rem; color: #1a1a1a; font-size: 1.25rem;">${title}</h3>
+        <p style="margin-bottom: 1.5rem; color: #6b6b6b; line-height: 1.5;">${message}</p>
+        <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+            <button id="confirmCancel" style="
+                padding: 0.5rem 1rem;
+                background: transparent;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+            ">Cancel</button>
+            <button id="confirmOk" style="
+                padding: 0.5rem 1rem;
+                background: #006a4e;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-weight: 500;
+            ">Confirm</button>
+        </div>
+    `;
+    
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    
+    // Add event listeners
+    document.getElementById('confirmCancel').onclick = () => overlay.remove();
+    document.getElementById('confirmOk').onclick = () => {
+        overlay.remove();
+        if (onConfirm) onConfirm();
+    };
 }
