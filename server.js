@@ -322,10 +322,31 @@ if (!process.env.VERCEL) {
 async function createGoogleCalendarEvent(auth, reservation) {
   const calendar = google.calendar({ version: 'v3', auth });
   
+  // Build attendees list
+  const attendees = [];
+  
+  // Always add the person making the reservation
+  attendees.push({ 
+    email: reservation.email,
+    displayName: reservation.name,
+    responseStatus: 'accepted', // They created it, so they accepted
+    comment: 'Reservation creator'
+  });
+  
+  // Add the calendar owner if different from the person making reservation
+  if (reservation.calendarOwnerEmail && reservation.calendarOwnerEmail !== reservation.email) {
+    attendees.push({
+      email: reservation.calendarOwnerEmail,
+      responseStatus: 'accepted', // Calendar owner implicitly accepts
+      organizer: true,
+      comment: 'Room administrator'
+    });
+  }
+  
   const event = {
     summary: `Film Room - ${reservation.name}`,
     location: 'Room 5 / The Film Room',
-    description: reservation.purpose || 'Film Room reservation',
+    description: `Reserved by: ${reservation.name}\nEmail: ${reservation.email}\n${reservation.purpose ? `Purpose: ${reservation.purpose}` : 'Film Room reservation'}\n\nThis is your confirmed reservation for The Film Room (Room 5).`,
     start: {
       dateTime: moment(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
       timeZone: 'America/Los_Angeles',
@@ -334,16 +355,21 @@ async function createGoogleCalendarEvent(auth, reservation) {
       dateTime: moment(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
       timeZone: 'America/Los_Angeles',
     },
-    attendees: [
-      { email: reservation.email }
-    ],
+    attendees: attendees,
     reminders: {
       useDefault: false,
       overrides: [
-        { method: 'email', minutes: 30 },
-        { method: 'popup', minutes: 10 },
+        { method: 'email', minutes: 60 }, // 1 hour before
+        { method: 'email', minutes: 30 },  // 30 minutes before  
+        { method: 'popup', minutes: 15 },  // 15 minutes before
       ],
     },
+    // Ensure the event shows as busy time
+    transparency: 'opaque',
+    // Set the event status
+    status: 'confirmed',
+    // Ensure guests can see other guests
+    guestsCanSeeOtherGuests: true
   };
 
   try {
@@ -351,13 +377,15 @@ async function createGoogleCalendarEvent(auth, reservation) {
       calendarId: config.google.calendarId,
       eventSummary: event.summary,
       startTime: event.start.dateTime,
-      endTime: event.end.dateTime
+      endTime: event.end.dateTime,
+      attendees: attendees.map(a => ({ email: a.email, status: a.responseStatus }))
     });
     
     const response = await calendar.events.insert({
       calendarId: config.google.calendarId || 'primary',
       resource: event,
-      sendNotifications: true
+      sendNotifications: true,
+      sendUpdates: 'all' // This ensures invitations are sent to all attendees
     });
     
     console.log('Calendar event created:', {
@@ -759,13 +787,13 @@ app.post('/api/reservations', async (req, res) => {
   
   // Try multiple sources for tokens
   let userTokens = null;
-  let userEmail = null;
+  let calendarOwnerEmail = null;
   
   // 1. Try session first (most reliable)
   if (req.session.user?.tokens) {
     userTokens = req.session.user.tokens;
-    userEmail = req.session.user.email;
-    console.log('Using tokens from session for:', userEmail);
+    calendarOwnerEmail = req.session.user.email;
+    console.log('Using tokens from session for:', calendarOwnerEmail);
   }
   
   // 2. Try memory store if no session
@@ -773,8 +801,8 @@ app.post('/api/reservations', async (req, res) => {
     const userData = memoryStore.users.get(memoryStore.latestUser);
     if (userData && userData.google_tokens) {
       userTokens = userData.google_tokens;
-      userEmail = userData.email;
-      console.log('Using tokens from memory store for:', userEmail);
+      calendarOwnerEmail = userData.email;
+      console.log('Using tokens from memory store for:', calendarOwnerEmail);
     }
   }
   
@@ -787,8 +815,8 @@ app.post('/api/reservations', async (req, res) => {
         if (userData) {
           const user = typeof userData === 'string' ? JSON.parse(userData) : userData;
           userTokens = user.google_tokens;
-          userEmail = user.email;
-          console.log('Using tokens from Redis for:', userEmail);
+          calendarOwnerEmail = user.email;
+          console.log('Using tokens from Redis for:', calendarOwnerEmail);
         }
       }
     } catch (error) {
@@ -819,7 +847,8 @@ app.post('/api/reservations', async (req, res) => {
         date,
         startTime,
         endTime,
-        purpose
+        purpose,
+        calendarOwnerEmail // Pass the calendar owner's email
       });
       
       googleEventId = googleEvent.id;

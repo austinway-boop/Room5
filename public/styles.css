@@ -75,9 +75,16 @@ header {
 }
 
 .google-auth-btn.connected {
-    background: var(--accent-green-lighter);
-    color: var(--accent-green-dark);
-    border-color: var(--accent-green-light);
+    background: #10B981;
+    color: white;
+    border-color: #059669;
+}
+
+.google-auth-btn.connected:hover {
+    background: #059669;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
 }
 
 .google-icon {

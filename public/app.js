@@ -24,8 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
             updateAuthButton();
         }
         
-        // Show success message
-        showSuccessModal('✅ Google Calendar connected successfully!');
+        // Don't show the popup - just log success
+        console.log('✅ Google Calendar connected successfully!');
         
         // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -134,10 +134,16 @@ function updateAuthButton() {
     
     if (isGoogleAuthenticated && currentUser) {
         btn.classList.add('connected');
-        btnText.textContent = `📅 ${currentUser.name || currentUser.email}`;
+        // Show a checkmark and the user's name or email
+        const displayName = currentUser.name || currentUser.email || 'Connected';
+        // Truncate long names
+        const truncatedName = displayName.length > 25 ? displayName.substring(0, 22) + '...' : displayName;
+        btnText.textContent = `✓ ${truncatedName}`;
+        btn.title = `Connected as ${displayName}\nClick to disconnect`;
     } else {
         btn.classList.remove('connected');
         btnText.textContent = 'Connect Google Calendar';
+        btn.title = 'Click to connect your Google Calendar';
     }
 }
 
@@ -199,6 +205,26 @@ function initializeDateSelector() {
 function updateDateInput() {
     const dateInput = document.getElementById('selectedDate');
     dateInput.value = formatDate(selectedDate);
+    
+    // Add day of week display
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const dayOfWeek = dayNames[selectedDate.getDay()];
+    const month = monthNames[selectedDate.getMonth()];
+    const day = selectedDate.getDate();
+    const year = selectedDate.getFullYear();
+    
+    // Update or create day display element
+    let dateDisplay = document.querySelector('.date-display');
+    if (!dateDisplay) {
+        // Create the day display if it doesn't exist
+        const container = document.querySelector('.date-selector');
+        dateDisplay = document.createElement('div');
+        dateDisplay.className = 'date-display';
+        dateDisplay.style.cssText = 'text-align: center; font-weight: 600; color: #4F46E5; margin-top: 8px; font-size: 14px;';
+        container.appendChild(dateDisplay);
+    }
+    dateDisplay.textContent = `${dayOfWeek}, ${month} ${day}, ${year}`;
 }
 
 function formatDate(date) {
