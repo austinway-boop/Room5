@@ -17,9 +17,20 @@ const PORT = config.server.port;
 app.use(cors());
 app.use(express.json());
 
-// Serve static files (for local development)
+// Serve static files
 if (!process.env.VERCEL) {
+  // Local development - use express.static
   app.use(express.static('public'));
+} else {
+  // Vercel - manually serve static files with proper headers
+  app.use((req, res, next) => {
+    // Set proper CORS and cache headers for static assets
+    if (req.path.endsWith('.css') || req.path.endsWith('.js')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+    }
+    next();
+  });
 }
 
 app.use(session({
@@ -155,21 +166,37 @@ async function deleteGoogleCalendarEvent(auth, eventId) {
 
 // API Routes
 
-// Root route for Vercel (serve the main HTML)
-if (process.env.VERCEL) {
-  app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Static file routes - must come before API routes
+app.get('/styles.css', (req, res) => {
+  res.setHeader('Content-Type', 'text/css; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'styles.css'), (err) => {
+    if (err) {
+      console.error('Error serving styles.css:', err);
+      res.status(404).send('Stylesheet not found');
+    }
   });
-  
-  // Serve static files explicitly in Vercel
-  app.get('/app.js', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'app.js'));
+});
+
+app.get('/app.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'app.js'), (err) => {
+    if (err) {
+      console.error('Error serving app.js:', err);
+      res.status(404).send('Script not found');
+    }
   });
-  
-  app.get('/styles.css', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'styles.css'));
+});
+
+// Root route - serve the main HTML
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'), (err) => {
+    if (err) {
+      console.error('Error serving index.html:', err);
+      res.status(404).send('Page not found');
+    }
   });
-}
+});
 
 // Google Auth Routes
 app.get('/auth/google', (req, res) => {
