@@ -48,7 +48,22 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 // Log the redirect URI for debugging
-console.log('OAuth Redirect URI configured as:', config.google.redirectUri);
+console.log('====================================');
+console.log('OAuth Configuration:');
+console.log('Redirect URI:', config.google.redirectUri);
+console.log('VERCEL_URL:', process.env.VERCEL_URL);
+console.log('Client ID:', config.google.clientId);
+console.log('====================================');
+
+// Add a debug endpoint to check configuration
+app.get('/debug/config', (req, res) => {
+  res.json({
+    redirectUri: config.google.redirectUri,
+    vercelUrl: process.env.VERCEL_URL,
+    clientId: config.google.clientId,
+    message: 'Add this EXACT redirect URI to Google Cloud Console'
+  });
+});
 
 // Database setup (use /tmp in Vercel for temporary storage)
 const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
