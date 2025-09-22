@@ -40,6 +40,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Show additional confirmation
             if (isGoogleAuthenticated) {
                 console.log('Calendar sync is now active for all reservations!');
+                // Load all reservations and display today's
+                await loadAllReservations();
+                generateCalendar();
+                await loadReservations(); // Show today's reservations
+                isDataLoaded = true;
             }
         }, 100);
     }
@@ -63,12 +68,18 @@ document.addEventListener('DOMContentLoaded', () => {
     checkAuthStatus().then(async () => {
         if (!isGoogleAuthenticated) {
             showAuthOverlay();
+            // Still load reservations for viewing (read-only)
+            await loadAllReservations();
+            generateCalendar();
+            await loadReservations(); // Show today's reservations even when not authenticated
             hideLoadingScreen();
         } else {
             hideAuthOverlay();
             // Load all data before allowing actions
             await loadAllReservations();
             generateCalendar();
+            // Load and display today's reservations in the side panel
+            await loadReservations(); // This shows today's reservations
             isDataLoaded = true;
             hideLoadingScreen();
         }
@@ -209,6 +220,11 @@ function initializeCalendar() {
     });
     
     generateCalendar();
+    
+    // Immediately try to load today's reservations (will work even without auth)
+    loadReservationsForDate(new Date()).catch(err => {
+        console.log('Initial reservation load failed:', err);
+    });
 }
 
 function generateCalendar() {
@@ -713,7 +729,11 @@ async function loadReservationsForDate(date) {
         });
         
         if (!response.ok) {
-            throw new Error('Failed to load reservations');
+            console.warn('Failed to load reservations, status:', response.status);
+            // Still update the header and show empty state
+            updateReservationsPanelHeader(dateToLoad);
+            displayReservations([], dateToLoad);
+            return;
         }
         
         const dayReservations = await response.json();
@@ -730,6 +750,10 @@ async function loadReservationsForDate(date) {
         }
     } catch (error) {
         console.error('Error loading reservations:', error);
+        // Still try to update UI with empty state
+        const dateToLoad = date || new Date();
+        updateReservationsPanelHeader(dateToLoad);
+        displayReservations([], dateToLoad);
     }
 }
 
