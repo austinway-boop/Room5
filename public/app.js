@@ -40,10 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Show additional confirmation
             if (isGoogleAuthenticated) {
                 console.log('Calendar sync is now active for all reservations!');
-                // Load all reservations and display today's
+                // Load all reservations and display future ones
                 await loadAllReservations();
                 generateCalendar();
-                await loadReservations(); // Show today's reservations
+                await loadReservations(); // Show future reservations
                 await loadUpcomingReservations(); // Load upcoming reservations
                 isDataLoaded = true;
             }
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Still load reservations for viewing (read-only)
             await loadAllReservations();
             generateCalendar();
-            await loadReservations(); // Show today's reservations even when not authenticated
+            await loadReservations(); // Show future reservations even when not authenticated
             await loadUpcomingReservations(); // Try to load upcoming (will show sign-in message)
             hideLoadingScreen();
         } else {
@@ -81,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await loadAllReservations();
             generateCalendar();
             // Load and display today's reservations in the side panel
-            await loadReservations(); // This shows today's reservations
+            await loadReservations(); // This shows future reservations
             await loadUpcomingReservations(); // Load user's upcoming reservations
             isDataLoaded = true;
             hideLoadingScreen();
@@ -224,8 +224,8 @@ function initializeCalendar() {
     
     generateCalendar();
     
-    // Immediately try to load today's reservations (will work even without auth)
-    loadReservationsForDate(new Date()).catch(err => {
+    // Immediately try to load future reservations (will work even without auth)
+    loadFutureReservations().catch(err => {
         console.log('Initial reservation load failed:', err);
     });
 }
@@ -344,7 +344,8 @@ function selectDate(date) {
     generateCalendar();
     updateSelectedDateDisplay();
     generateTimeSlots();
-    loadReservationsForDate(date);
+    // When a specific date is selected, still show future reservations
+    loadFutureReservations();
 }
 
 function updateSelectedDateDisplay() {
@@ -669,12 +670,8 @@ async function handleReservationSubmit() {
         // Reload reservations for the selected date
         showLoadingScreen();
         await loadAllReservations();
-        // Make sure to show the selected date's reservations, not today's
-        if (selectedDate) {
-            await loadReservationsForDate(selectedDate);
-        } else {
-            await loadReservations();
-        }
+        // Reload future reservations after creating a new one
+        await loadReservations();
         await loadUpcomingReservations(); // Refresh upcoming reservations
         hideLoadingScreen();
         
@@ -710,9 +707,75 @@ async function loadAllReservations() {
 }
 
 async function loadReservations() {
-    // Load today's reservations by default
-    const today = new Date();
-    await loadReservationsForDate(today);
+    // Load all future reservations (including today's remaining)
+    await loadFutureReservations();
+}
+
+// Load all future reservations to display in the main panel
+async function loadFutureReservations() {
+    try {
+        const container = document.getElementById('reservationsList');
+        
+        // Fetch all reservations
+        const response = await fetch(`${API_URL}/reservations`, {
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            container.innerHTML = '<div class="empty-state-compact">Failed to load reservations</div>';
+            return;
+        }
+        
+        const allReservations = await response.json();
+        
+        // Filter for future reservations (all users)
+        const now = new Date();
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const futureReservations = allReservations.filter(r => {
+            // Parse the reservation date
+            const resDate = new Date(r.date + 'T00:00:00');
+            
+            // Include today's reservations if they haven't happened yet
+            if (r.date === formatDate(today)) {
+                // Check if the reservation time is in the future
+                const [hours, minutes] = r.startTime.split(':').map(Number);
+                const resTime = new Date();
+                resTime.setHours(hours, minutes, 0, 0);
+                return resTime > now;
+            }
+            
+            // Include all future dates
+            return resDate > today;
+        });
+        
+        // Sort by date and time
+        futureReservations.sort((a, b) => {
+            const dateCompare = a.date.localeCompare(b.date);
+            if (dateCompare !== 0) return dateCompare;
+            return a.startTime.localeCompare(b.startTime);
+        });
+        
+        // Update header with count
+        const headerElement = document.querySelector('.panel-header h3');
+        if (headerElement) {
+            headerElement.textContent = `Future Reservations (${futureReservations.length})`;
+        }
+        
+        if (futureReservations.length === 0) {
+            container.innerHTML = '<div class="empty-state-compact">No upcoming reservations</div>';
+            return;
+        }
+        
+        // Display all future reservations
+        displayReservations(futureReservations, null);
+        
+    } catch (error) {
+        console.error('Error loading future reservations:', error);
+        document.getElementById('reservationsList').innerHTML = 
+            '<div class="empty-state-compact">Error loading reservations</div>';
+    }
 }
 
 // Load upcoming reservations for the current user
@@ -824,13 +887,8 @@ async function loadUpcomingReservations() {
 }
 
 async function refreshCurrentReservations() {
-    // Refresh reservations for the currently displayed date
-    const headerElement = document.querySelector('.panel-header h3');
-    if (selectedDate) {
-        await loadReservationsForDate(selectedDate);
-    } else {
-        await loadReservations();
-    }
+    // Refresh future reservations
+    await loadFutureReservations();
 }
 
 async function loadReservationsForDate(date) {
@@ -871,7 +929,8 @@ async function loadReservationsForDate(date) {
 
 function updateReservationsPanelHeader(date) {
     const headerElement = document.querySelector('.panel-header h3');
-    if (headerElement) {
+    if (headerElement && date) {
+        // Only update header when viewing a specific date from loadReservationsForDate
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         date.setHours(0, 0, 0, 0);
@@ -891,6 +950,7 @@ function updateReservationsPanelHeader(date) {
         
         headerElement.textContent = headerText;
     }
+    // If no date specified, it will keep "Future Reservations" as set in loadFutureReservations
 }
 
 function displayReservations(dayReservations, date) {
@@ -1027,7 +1087,7 @@ function initializeWebSocket() {
         // Poll for updates in production instead
         setInterval(() => {
             loadAllReservations();
-            loadReservations();
+            loadFutureReservations();
         }, 10000); // Refresh every 10 seconds
         return;
     }
@@ -1061,7 +1121,7 @@ function initializeWebSocket() {
         // Fall back to polling
         setInterval(() => {
             loadAllReservations();
-            loadReservations();
+            loadFutureReservations();
         }, 10000);
     }
 }
@@ -1074,7 +1134,7 @@ function handleWebSocketMessage(message) {
         message.type === 'reservation_updated' || 
         message.type === 'reservation_deleted') {
         loadAllReservations();
-        loadReservations();
+        loadFutureReservations(); // Update to use future reservations
         generateCalendar();
         if (selectedDate) {
             generateTimeSlots();
