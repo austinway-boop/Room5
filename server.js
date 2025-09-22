@@ -47,6 +47,9 @@ const oauth2Client = new google.auth.OAuth2(
   config.google.redirectUri
 );
 
+// Log the redirect URI for debugging
+console.log('OAuth Redirect URI configured as:', config.google.redirectUri);
+
 // Database setup (use /tmp in Vercel for temporary storage)
 const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
 const db = new sqlite3.Database(dbPath);

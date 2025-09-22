@@ -244,8 +244,9 @@ h1 {
 }
 
 .reservation-info .reservation-purpose {
-    opacity: 0.9;
+    opacity: 1;
     font-size: 0.85rem;
+    color: #ffffff;
 }
 
 /* Legend */
@@ -480,7 +481,7 @@ textarea {
 
 .reservation-purpose {
     font-size: 0.9rem;
-    color: var(--text-muted);
+    color: #ffffff;
 }
 
 .reservation-actions {
