@@ -4,11 +4,14 @@ const WebSocket = require('ws');
 const cors = require('cors');
 const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
-const moment = require('moment');
+const moment = require('moment-timezone');
 const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
 const { Redis } = require('@upstash/redis');
+
+// Set default timezone to CST
+moment.tz.setDefault('America/Chicago');
 
 const app = express();
 const PORT = config.server.port;
@@ -343,16 +346,27 @@ async function createGoogleCalendarEvent(auth, reservation) {
     });
   }
   
+  // Parse the times as CST and convert to proper ISO format
+  const startDateTime = moment.tz(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+  const endDateTime = moment.tz(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+  
+  console.log('Creating calendar event with times:', {
+    inputStart: `${reservation.date} ${reservation.startTime} CST`,
+    inputEnd: `${reservation.date} ${reservation.endTime} CST`,
+    isoStart: startDateTime.toISOString(),
+    isoEnd: endDateTime.toISOString()
+  });
+  
   const event = {
     summary: `Film Room - ${reservation.name}`,
     location: 'Room 5 / The Film Room',
     description: `Reserved by: ${reservation.name}\nEmail: ${reservation.email}\n${reservation.purpose ? `Purpose: ${reservation.purpose}` : 'Film Room reservation'}\n\nThis is your confirmed reservation for The Film Room (Room 5).`,
     start: {
-      dateTime: moment(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
+      dateTime: startDateTime.toISOString(),
       timeZone: 'America/Chicago', // CST timezone
     },
     end: {
-      dateTime: moment(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm').toISOString(),
+      dateTime: endDateTime.toISOString(),
       timeZone: 'America/Chicago', // CST timezone
     },
     attendees: attendees,
@@ -742,11 +756,11 @@ app.post('/api/check-availability', async (req, res) => {
             const reservation = JSON.parse(data);
             
             if (reservation.date === date && reservation.id !== excludeId) {
-              // Check for time overlap
-              const reqStart = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
-              const reqEnd = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
-              const resStart = moment(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm');
-              const resEnd = moment(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm');
+              // Check for time overlap (parse as CST)
+              const reqStart = moment.tz(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+              const reqEnd = moment.tz(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+              const resStart = moment.tz(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+              const resEnd = moment.tz(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
               
               if ((reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart))) {
                 conflicts.push(reservation);
@@ -768,9 +782,9 @@ app.post('/api/check-availability', async (req, res) => {
 app.post('/api/reservations', async (req, res) => {
   const { name, email, date, startTime, endTime, purpose } = req.body;
   
-  // Calculate duration in minutes
-  const start = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
-  const end = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
+  // Calculate duration in minutes (parse as CST)
+  const start = moment.tz(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+  const end = moment.tz(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
   const duration = end.diff(start, 'minutes');
   
   // Check if duration is valid
@@ -987,9 +1001,9 @@ app.put('/api/reservations/:id', async (req, res) => {
   const { name, email, date, startTime, endTime, purpose } = req.body;
   
   try {
-    // Calculate duration
-    const start = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
-    const end = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
+    // Calculate duration (parse as CST)
+    const start = moment.tz(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
+    const end = moment.tz(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
     const duration = end.diff(start, 'minutes');
     
     let existingReservation = null;
