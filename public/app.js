@@ -8,6 +8,7 @@ let reservations = [];
 let ws = null;
 let isGoogleAuthenticated = false;
 let currentUser = null;
+let isDataLoaded = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -46,21 +47,27 @@ document.addEventListener('DOMContentLoaded', () => {
         window.history.replaceState({}, document.title, window.location.pathname);
     }
     
+    // Show loading screen immediately
+    showLoadingScreen();
+    
     initializeDateSelector();
     initializeForm();
     initializeWebSocket();
     
     // Check auth and show overlay if not authenticated
-    checkAuthStatus().then(() => {
+    checkAuthStatus().then(async () => {
         if (!isGoogleAuthenticated) {
             showAuthOverlay();
+            hideLoadingScreen();
         } else {
             hideAuthOverlay();
+            // Load all data before allowing actions
+            await loadReservations();
+            generateTimeline();
+            isDataLoaded = true;
+            hideLoadingScreen();
         }
     });
-    
-    loadReservations();
-    generateTimeline();
 });
 
 // Google Auth
@@ -185,6 +192,36 @@ async function handleGoogleAuth() {
 
 // Removed duplicate auth callback check - already handled in DOMContentLoaded
 
+// Time format conversion functions
+function convertTo12Hour(time24) {
+    // Convert 24-hour time (HH:MM) to 12-hour format (h:mm AM/PM)
+    if (!time24) return '';
+    
+    const [hours, minutes] = time24.split(':');
+    const hour = parseInt(hours);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+    
+    return `${hour12}:${minutes} ${period}`;
+}
+
+function convertTo24Hour(time12) {
+    // Convert 12-hour time to 24-hour format
+    const match = time12.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!match) return time12;
+    
+    let [_, hours, minutes, period] = match;
+    hours = parseInt(hours);
+    
+    if (period.toUpperCase() === 'PM' && hours !== 12) {
+        hours += 12;
+    } else if (period.toUpperCase() === 'AM' && hours === 12) {
+        hours = 0;
+    }
+    
+    return `${String(hours).padStart(2, '0')}:${minutes}`;
+}
+
 // Date Selector
 function initializeDateSelector() {
     const dateInput = document.getElementById('selectedDate');
@@ -194,24 +231,30 @@ function initializeDateSelector() {
     // Set initial date
     updateDateInput();
     
-    dateInput.addEventListener('change', (e) => {
+    dateInput.addEventListener('change', async (e) => {
         selectedDate = new Date(e.target.value + 'T00:00:00');
-        loadReservations();
+        showLoadingScreen();
+        await loadReservations();
         generateTimeline();
+        hideLoadingScreen();
     });
     
-    prevBtn.addEventListener('click', () => {
+    prevBtn.addEventListener('click', async () => {
         selectedDate.setDate(selectedDate.getDate() - 1);
         updateDateInput();
-        loadReservations();
+        showLoadingScreen();
+        await loadReservations();
         generateTimeline();
+        hideLoadingScreen();
     });
     
-    nextBtn.addEventListener('click', () => {
+    nextBtn.addEventListener('click', async () => {
         selectedDate.setDate(selectedDate.getDate() + 1);
         updateDateInput();
-        loadReservations();
+        showLoadingScreen();
+        await loadReservations();
         generateTimeline();
+        hideLoadingScreen();
     });
 }
 
@@ -315,6 +358,12 @@ async function handleReservationSubmit() {
         return;
     }
     
+    // Check if data is loaded
+    if (!isDataLoaded) {
+        alert('Please wait for the calendar to load completely.');
+        return;
+    }
+    
     const form = document.getElementById('reservationForm');
     const formData = new FormData(form);
     
@@ -364,9 +413,11 @@ async function handleReservationSubmit() {
         form.reset();
         updateDurationDisplay();
         
-        // Reload reservations
-        loadReservations();
+        // Reload reservations with loading indicator
+        showLoadingScreen();
+        await loadReservations();
         generateTimeline();
+        hideLoadingScreen();
         
     } catch (error) {
         console.error('Error creating reservation:', error);
@@ -399,7 +450,7 @@ function createTimeSlot(startTime, endTime) {
     
     const timeLabel = document.createElement('div');
     timeLabel.className = 'time-label';
-    timeLabel.textContent = startTime;
+    timeLabel.textContent = convertTo12Hour(startTime);  // Display in 12-hour format
     
     const slotStatus = document.createElement('div');
     slotStatus.className = 'slot-status';
@@ -471,7 +522,7 @@ function displayReservations() {
     container.innerHTML = reservations.map(reservation => `
         <div class="reservation-card" data-id="${reservation.id}">
             <div class="reservation-header">
-                <span class="reservation-time">${reservation.startTime} - ${reservation.endTime} CST</span>
+                <span class="reservation-time">${convertTo12Hour(reservation.startTime)} - ${convertTo12Hour(reservation.endTime)} CST</span>
                 <span class="reservation-duration">${reservation.duration} min</span>
             </div>
             <div class="reservation-body">
@@ -642,7 +693,7 @@ function showSuccessModal(reservation) {
         details.innerHTML = `
             <div>
                 <strong>Date:</strong> ${reservation.date}<br>
-                <strong>Time:</strong> ${reservation.startTime} - ${reservation.endTime}<br>
+                <strong>Time:</strong> ${convertTo12Hour(reservation.startTime)} - ${convertTo12Hour(reservation.endTime)} CST<br>
                 <strong>Duration:</strong> ${reservation.duration} minutes<br>
                 ${reservation.purpose ? `<strong>Purpose:</strong> ${reservation.purpose}<br>` : ''}
                 ${reservation.googleCalendarAdded ? 
@@ -742,5 +793,59 @@ function hideAuthOverlay() {
     const overlay = document.getElementById('authOverlay');
     if (overlay) {
         overlay.style.display = 'none';
+    }
+}
+
+// Loading screen functions
+function showLoadingScreen() {
+    let loadingScreen = document.getElementById('loadingScreen');
+    if (!loadingScreen) {
+        loadingScreen = document.createElement('div');
+        loadingScreen.id = 'loadingScreen';
+        loadingScreen.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        `;
+        
+        loadingScreen.innerHTML = `
+            <div style="text-align: center;">
+                <div style="
+                    width: 60px;
+                    height: 60px;
+                    border: 4px solid #E5E7EB;
+                    border-top: 4px solid #10B981;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin: 0 auto 20px;
+                "></div>
+                <h2 style="color: #1F2937; margin-bottom: 10px;">Loading Reservations</h2>
+                <p style="color: #6B7280;">Please wait while we load all current reservations...</p>
+            </div>
+            <style>
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+            </style>
+        `;
+        
+        document.body.appendChild(loadingScreen);
+    }
+    loadingScreen.style.display = 'flex';
+}
+
+function hideLoadingScreen() {
+    const loadingScreen = document.getElementById('loadingScreen');
+    if (loadingScreen) {
+        loadingScreen.style.display = 'none';
     }
 }
