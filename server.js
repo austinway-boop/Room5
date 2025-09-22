@@ -740,7 +740,7 @@ app.get('/api/reservations', async (req, res) => {
 
 // Check availability
 app.post('/api/check-availability', async (req, res) => {
-  const { date, startTime, endTime, excludeId } = req.body;
+  const { date, startTime, endTime, excludeId, email } = req.body;
   
   try {
     let conflicts = [];
@@ -762,6 +762,8 @@ app.post('/api/check-availability', async (req, res) => {
               const resStart = moment.tz(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
               const resEnd = moment.tz(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm', 'America/Chicago');
               
+              // Only check for TIME conflicts, not who booked it
+              // This allows the same person to book multiple non-overlapping slots
               if ((reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart))) {
                 conflicts.push(reservation);
               }
@@ -770,6 +772,9 @@ app.post('/api/check-availability', async (req, res) => {
         }
       }
     }
+    
+    // Log for debugging
+    console.log(`Checking availability for ${date} ${startTime}-${endTime}: Found ${conflicts.length} conflicts`);
     
     res.json({ available: conflicts.length === 0, conflicts });
   } catch (error) {

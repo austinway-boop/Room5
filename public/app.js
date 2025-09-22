@@ -457,6 +457,11 @@ function selectTimeSlot(startTime, endTime) {
     document.getElementById('startTime').value = startTime;
     document.getElementById('endTime').value = endTime;
     
+    // Ensure reservations panel shows the selected date's reservations
+    if (selectedDate) {
+        loadReservationsForDate(selectedDate);
+    }
+    
     // Switch to form view
     showBookingForm(startTime, endTime);
     
@@ -579,6 +584,14 @@ async function handleReservationSubmit() {
         purpose: formData.get('purpose')
     };
     
+    // Log what we're checking for debugging
+    console.log('Checking availability for:', {
+        date: reservation.date,
+        startTime: reservation.startTime,
+        endTime: reservation.endTime,
+        selectedDate: selectedDate
+    });
+    
     // Check availability first
     try {
         const availabilityResponse = await fetch(`${API_URL}/check-availability`, {
@@ -591,6 +604,10 @@ async function handleReservationSubmit() {
         const availability = await availabilityResponse.json();
         
         if (!availability.available) {
+            console.log('Conflicts found:', availability.conflicts);
+            // Ensure we're showing the selected date's reservations
+            await loadReservationsForDate(selectedDate);
+            // Show conflict modal with better information
             showConflictModal(availability.conflicts);
             return;
         }
@@ -617,10 +634,15 @@ async function handleReservationSubmit() {
         
         // Don't clear the selected date - user might want to book another time on same day
         
-        // Reload reservations
+        // Reload reservations for the selected date
         showLoadingScreen();
         await loadAllReservations();
-        await loadReservations();
+        // Make sure to show the selected date's reservations, not today's
+        if (selectedDate) {
+            await loadReservationsForDate(selectedDate);
+        } else {
+            await loadReservations();
+        }
         hideLoadingScreen();
         
     } catch (error) {
@@ -897,17 +919,28 @@ function showConflictModal(conflicts) {
     const modal = document.getElementById('conflictModal');
     const details = document.getElementById('conflictDetails');
     
+    // Get the selected date for context
+    const dateContext = selectedDate ? selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : '';
+    
     // Handle cases where conflicts might not be an array
     if (!conflicts || !Array.isArray(conflicts)) {
         details.innerHTML = `<p>This time slot is not available.</p>`;
+    } else if (conflicts.length === 0) {
+        // No conflicts but availability said false - this shouldn't happen
+        details.innerHTML = `<p>This time slot appears to be unavailable. Please try another time.</p>`;
     } else {
-    details.innerHTML = conflicts.map(c => `
-        <div style="margin-bottom: 1rem;">
-            <strong>${c.name}</strong><br>
-                ${convertTo12Hour(c.startTime)} - ${convertTo12Hour(c.endTime)}<br>
-            ${c.purpose || 'No description'}
-        </div>
-    `).join('');
+        // Show the date context first
+        const dateHeader = dateContext ? `<p style="margin-bottom: 1rem; color: #666;"><strong>Date:</strong> ${dateContext}</p>` : '';
+        
+        const conflictsList = conflicts.map(c => `
+            <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f5f5f5; border-radius: 4px;">
+                <strong>${c.name}</strong><br>
+                <span style="color: #006a4e; font-weight: 500;">${convertTo12Hour(c.startTime)} - ${convertTo12Hour(c.endTime)}</span><br>
+                ${c.purpose ? `<span style="color: #666; font-size: 0.875rem;">${c.purpose}</span>` : ''}
+            </div>
+        `).join('');
+        
+        details.innerHTML = dateHeader + '<p style="margin-bottom: 0.5rem;">The following reservation(s) conflict with your selected time:</p>' + conflictsList;
     }
     
     modal.classList.add('show');
