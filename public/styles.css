@@ -28,13 +28,12 @@
 
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: var(--radius-sm);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -75,7 +74,7 @@ body {
     border-bottom: 1px solid var(--border-light);
     padding: 1rem 2rem;
     box-shadow: var(--shadow-sm);
-    height: 80px;
+    height: 70px;
     display: flex;
     align-items: center;
 }
@@ -112,7 +111,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.625rem 1.25rem;
+    padding: 0.5rem 1rem;
     background: var(--bg-primary);
     border: 1px solid var(--calendly-green);
     color: var(--calendly-green);
@@ -147,32 +146,34 @@ body {
 /* Main Content Grid */
 .calendly-main {
     display: grid;
-    grid-template-columns: 380px 1fr 320px;
+    grid-template-columns: 320px 1fr 380px;
     max-width: 1440px;
     margin: 0 auto;
     width: 100%;
-    height: calc(100vh - 80px); /* Subtract header height */
+    height: calc(100vh - 70px);
     overflow: hidden;
 }
 
-/* Left Panel - Booking Info */
+/* Left Panel - Info & Reservations */
 .calendly-left-panel {
     background: var(--bg-primary);
     border-right: 1px solid var(--border-light);
-    padding: 2rem;
+    padding: 1.5rem;
     overflow-y: auto;
     height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .booking-header {
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
 }
 
 .booking-header h2 {
-    font-size: 1.375rem;
+    font-size: 1.25rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
 }
 
 .booking-description {
@@ -180,126 +181,172 @@ body {
     font-size: 0.875rem;
 }
 
-/* Info Cards */
+/* Compact Info Cards */
 .booking-info {
     margin-bottom: 1.5rem;
 }
 
-.info-card {
+.info-card.compact {
     display: flex;
+    align-items: center;
     gap: 0.75rem;
-    padding: 0.625rem;
+    padding: 0.75rem;
     background: var(--calendly-green-lightest);
-    border-radius: var(--radius-sm);
-    margin-bottom: 0.5rem;
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
 }
 
-.info-icon {
+.info-card.compact .info-icon {
     width: 32px;
     height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--calendly-green-lighter);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     flex-shrink: 0;
 }
 
-.info-icon svg {
+.info-card.compact .info-icon svg {
     width: 16px;
     height: 16px;
     stroke: var(--calendly-green);
 }
 
-.info-content h3 {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.125rem;
-}
-
-.info-content p {
-    font-size: 0.75rem;
+.info-card.compact .info-content p {
+    font-size: 0.813rem;
     color: var(--text-secondary);
-    line-height: 1.3;
+    margin: 0;
 }
 
-/* Booking Form */
-.booking-form-section {
-    padding-top: 1rem;
-    border-top: 1px solid var(--border-light);
-    margin-bottom: 2rem;
+/* Reservations Panel */
+.reservations-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
-.booking-form-section h3 {
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.panel-header h3 {
     font-size: 1rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 1.5rem;
 }
 
-.form-group {
-    margin-bottom: 1.25rem;
-}
-
-.form-group label {
-    display: block;
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 0.5rem;
-}
-
-.form-group input,
-.form-group textarea {
-    width: 100%;
-    padding: 0.625rem 0.875rem;
-    border: 1px solid var(--border-medium);
+.refresh-btn-small {
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border-light);
     border-radius: var(--radius-sm);
-    font-size: 0.875rem;
-    transition: all 0.2s ease;
-}
-
-.form-group input:focus,
-.form-group textarea:focus {
-    outline: none;
-    border-color: var(--calendly-green);
-    box-shadow: 0 0 0 3px var(--calendly-green-lighter);
-}
-
-textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-
-/* Submit Button */
-.submit-btn {
-    width: 100%;
-    padding: 0.875rem;
-    background: var(--calendly-green);
-    color: white;
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 1rem;
-    font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
-.submit-btn:hover:not(:disabled) {
-    background: var(--calendly-green-dark);
+.refresh-btn-small:hover {
+    background: var(--bg-hover);
+    border-color: var(--calendly-green);
 }
 
-.submit-btn:disabled {
-    background: var(--border-medium);
+/* Compact Reservation Cards */
+.reservations-list-compact {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.reservation-card-compact {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    transition: all 0.2s ease;
+}
+
+.reservation-card-compact:hover {
+    background: var(--calendly-green-lightest);
+    border-color: var(--calendly-green-light);
+}
+
+.reservation-time-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 50px;
+}
+
+.reservation-time-compact {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--calendly-green);
+}
+
+.reservation-duration-compact {
+    font-size: 0.688rem;
     color: var(--text-muted);
-    cursor: not-allowed;
+}
+
+.reservation-info-compact {
+    flex: 1;
+    min-width: 0;
+}
+
+.reservation-name-compact {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.reservation-purpose-compact {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-delete-compact {
+    padding: 0.25rem;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: var(--radius-sm);
+}
+
+.btn-delete-compact:hover {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.empty-state-compact {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--text-muted);
+    font-size: 0.875rem;
 }
 
 /* Middle Panel - Calendar */
 .calendly-middle-panel {
     background: var(--bg-primary);
-    padding: 2rem;
+    padding: 1.5rem 2rem;
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -329,9 +376,8 @@ textarea {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
     flex: 1;
-    max-height: 450px;
 }
 
 .calendar-day-header {
@@ -341,13 +387,6 @@ textarea {
     color: var(--text-secondary);
     padding: 0.5rem;
     text-transform: uppercase;
-}
-
-/* Weekend headers */
-.calendar-day-header:first-child,
-.calendar-day-header:last-child {
-    color: var(--text-muted);
-    opacity: 0.7;
 }
 
 .calendar-day {
@@ -361,6 +400,7 @@ textarea {
     transition: all 0.2s ease;
     background: var(--bg-primary);
     border: 1px solid transparent;
+    position: relative;
 }
 
 .calendar-day:hover:not(.disabled):not(.selected) {
@@ -383,20 +423,21 @@ textarea {
     color: var(--text-muted);
     cursor: not-allowed;
     background: var(--bg-secondary);
-    position: relative;
 }
 
-.calendar-day.disabled:hover {
-    background: var(--bg-secondary);
-    border-color: transparent;
+.calendar-day.weekend {
+    background: repeating-linear-gradient(
+        45deg,
+        var(--bg-secondary),
+        var(--bg-secondary) 10px,
+        #f5f5f5 10px,
+        #f5f5f5 20px
+    );
 }
 
 .calendar-day.other-month {
     color: var(--text-muted);
-}
-
-.calendar-day.has-reservations {
-    position: relative;
+    opacity: 0.5;
 }
 
 .calendar-day.has-reservations::after {
@@ -409,6 +450,10 @@ textarea {
     height: 4px;
     background: var(--calendly-green);
     border-radius: 50%;
+}
+
+.calendar-day.selected.has-reservations::after {
+    background: white;
 }
 
 /* Calendar Navigation */
@@ -424,27 +469,31 @@ textarea {
     padding: 0.5rem 1rem;
     background: var(--bg-primary);
     border: 1px solid var(--border-medium);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
     cursor: pointer;
     transition: all 0.2s ease;
-    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .calendar-nav-btn:hover {
-    background: var(--bg-hover);
+    background: var(--calendly-green);
     border-color: var(--calendly-green);
+    color: white;
 }
 
-/* Right Panel - Time Slots */
+/* Right Panel - Time Slots & Form */
 .calendly-right-panel {
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-light);
-    padding: 2rem 1.5rem;
+    padding: 1.5rem;
     overflow-y: auto;
     height: 100%;
 }
 
+/* Time Slots View */
 .time-header {
     margin-bottom: 1.5rem;
 }
@@ -468,7 +517,7 @@ textarea {
     gap: 0.5rem;
     overflow-y: auto;
     flex: 1;
-    max-height: calc(100vh - 300px);
+    max-height: calc(100vh - 250px);
 }
 
 .no-date-selected {
@@ -516,53 +565,64 @@ textarea {
     opacity: 0.6;
 }
 
-/* Selected Time Display */
-.selected-time-display {
-    margin-top: 2rem;
-    padding: 1rem;
-    background: var(--calendly-green-lightest);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--calendly-green-lighter);
-}
-
-.selected-time-header {
+/* Booking Form View */
+.form-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-light);
 }
 
-.selected-time-header h4 {
-    font-size: 0.875rem;
+.back-btn {
+    padding: 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.back-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--calendly-green);
+    color: var(--calendly-green);
+}
+
+.form-header h3 {
+    font-size: 1.125rem;
     font-weight: 600;
     color: var(--text-primary);
 }
 
-.change-time-btn {
-    padding: 0.25rem 0.75rem;
-    background: transparent;
-    border: 1px solid var(--calendly-green);
-    border-radius: var(--radius-sm);
-    color: var(--calendly-green);
-    font-size: 0.75rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
+/* Selected Time Card */
+.selected-time-card {
+    background: var(--calendly-green-lightest);
+    border: 1px solid var(--calendly-green-lighter);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
 }
 
-.change-time-btn:hover {
-    background: var(--calendly-green);
-    color: white;
+.time-card-header {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
 }
 
-.selected-time-info {
+.time-card-body {
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
-#selectedTimeText {
-    font-size: 1rem;
+.time-card-body > span:first-child {
+    font-size: 1.125rem;
     font-weight: 600;
     color: var(--calendly-green);
 }
@@ -576,151 +636,58 @@ textarea {
     font-weight: 500;
 }
 
-/* Reservations Summary */
-.reservations-summary {
-    max-width: 1440px;
-    margin: 2rem auto;
-    padding: 2rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
+/* Form Elements */
+.form-group {
+    margin-bottom: 1.25rem;
 }
 
-.summary-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-}
-
-.summary-header h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.refresh-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-medium);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
+.form-group label {
+    display: block;
     font-size: 0.875rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.refresh-btn:hover {
-    background: var(--bg-hover);
-    border-color: var(--calendly-green);
-    color: var(--calendly-green);
-}
-
-/* Reservation Cards */
-.reservations-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
-}
-
-.reservation-card {
-    padding: 1.25rem;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
-    display: flex;
-    flex-direction: column;
-}
-
-.reservation-card:hover {
-    border-color: var(--calendly-green);
-    box-shadow: var(--shadow-md);
-}
-
-.reservation-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-}
-
-.reservation-time {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--calendly-green);
-}
-
-.reservation-duration {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-}
-
-.reservation-body {
-    flex: 1;
-    margin-bottom: 1rem;
-}
-
-.reservation-name {
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 0.5rem;
 }
 
-.reservation-purpose {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.75rem;
-    word-wrap: break-word;
-}
-
-.google-calendar-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.25rem 0.75rem;
-    background: var(--calendly-green-lighter);
-    color: var(--calendly-green);
-    border-radius: 100px;
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.reservation-actions {
-    margin-top: auto;
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-}
-
-.btn-delete {
-    padding: 0.5rem 1rem;
-    background: var(--bg-primary);
-    border: 1px solid #dc2626;
-    color: #dc2626;
+.form-group input,
+.form-group textarea {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border-medium);
     border-radius: var(--radius-sm);
     font-size: 0.875rem;
-    font-weight: 500;
+    transition: all 0.2s ease;
+    background: var(--bg-primary);
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--calendly-green);
+    box-shadow: 0 0 0 3px var(--calendly-green-lighter);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Submit Button */
+.submit-btn {
+    width: 100%;
+    padding: 0.875rem;
+    background: var(--calendly-green);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1rem;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
-.btn-delete:hover {
-    background: #dc2626;
-    color: white;
-}
-
-.empty-state {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 3rem;
-    color: var(--text-muted);
+.submit-btn:hover {
+    background: var(--calendly-green-dark);
 }
 
 /* Connection Status */
@@ -843,7 +810,7 @@ textarea {
 /* Responsive Design */
 @media (max-width: 1200px) {
     .calendly-main {
-        grid-template-columns: 320px 1fr 280px;
+        grid-template-columns: 280px 1fr 320px;
     }
 }
 
@@ -852,7 +819,7 @@ textarea {
         grid-template-columns: 1fr;
         grid-template-rows: auto;
         height: auto;
-        min-height: calc(100vh - 80px);
+        min-height: calc(100vh - 70px);
     }
     
     .calendly-left-panel,
@@ -864,15 +831,15 @@ textarea {
         min-height: 400px;
     }
     
-    .calendly-left-panel {
-        order: 2;
-    }
-    
     .calendly-middle-panel {
         order: 1;
     }
     
     .calendly-right-panel {
+        order: 2;
+    }
+    
+    .calendly-left-panel {
         order: 3;
     }
 }
@@ -880,6 +847,7 @@ textarea {
 @media (max-width: 640px) {
     .calendly-header {
         padding: 1rem;
+        height: auto;
     }
     
     .header-content {
@@ -896,10 +864,6 @@ textarea {
     .calendly-middle-panel,
     .calendly-right-panel {
         padding: 1rem;
-    }
-    
-    .reservations-list {
-        grid-template-columns: 1fr;
     }
     
     .calendar-grid {

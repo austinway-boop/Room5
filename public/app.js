@@ -273,20 +273,18 @@ function createCalendarDay(day, monthOffset) {
     today.setHours(0, 0, 0, 0);
     date.setHours(0, 0, 0, 0);
     
-    // Get day of week (0 = Sunday, 6 = Saturday)
-    const dayOfWeek = date.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    
     // Add classes based on date
     if (monthOffset !== 0) {
         dayEl.classList.add('other-month');
     }
     
-    // Disable past dates and weekends
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;  // Sunday = 0, Saturday = 6
+    
     if (date < today || isWeekend) {
         dayEl.classList.add('disabled');
-        if (isWeekend && date >= today) {
-            dayEl.title = dayOfWeek === 0 ? 'Closed on Sundays' : 'Closed on Saturdays';
+        if (isWeekend) {
+            dayEl.classList.add('weekend');
         }
     } else {
         if (date.getTime() === today.getTime()) {
@@ -302,7 +300,7 @@ function createCalendarDay(day, monthOffset) {
             dayEl.classList.add('has-reservations');
         }
         
-        // Add click handler only for weekdays
+        // Add click handler (only for weekdays)
         dayEl.addEventListener('click', () => selectDate(date));
     }
     
@@ -351,15 +349,15 @@ function generateTimeSlots() {
     
     // Check if selected date is a weekend
     const dayOfWeek = selectedDate.getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
+    if (dayOfWeek === 0 || dayOfWeek === 6) {  // Sunday = 0, Saturday = 6
         container.innerHTML = `
             <div class="no-date-selected">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
-                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
-                    <line x1="12" y1="2" x2="12" y2="12"></line>
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M8 12L12 16L16 12M8 6L12 10L16 6"></path>
                 </svg>
-                <p>The Film Room is closed on weekends</p>
-                <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.5rem;">Available Monday-Friday, Noon-8:00 PM</p>
+                <p>The Film Room is not available on weekends</p>
+                <p style="font-size: 0.75rem; margin-top: 0.5rem;">Please select a weekday (Monday-Friday)</p>
             </div>
         `;
         return;
@@ -367,10 +365,10 @@ function generateTimeSlots() {
     
     container.innerHTML = '';
     
-    // Generate 30-minute slots from Noon (12 PM) to 8 PM for weekdays only
+    // Generate 30-minute slots from 12 PM (noon) to 8 PM for weekdays only
     for (let hour = 12; hour <= 19; hour++) {
         for (let minutes = 0; minutes < 60; minutes += 30) {
-            // Last slot should be 7:30 PM (ending at 8:00 PM)
+            // Don't create 8:00 PM slot (last slot should be 7:30 PM)
             if (hour === 19 && minutes === 30) break;
             
             const startTime = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
@@ -430,39 +428,46 @@ function selectTimeSlot(startTime, endTime) {
     document.getElementById('startTime').value = startTime;
     document.getElementById('endTime').value = endTime;
     
-    // Update UI
-    generateTimeSlots();
-    updateSelectedTimeDisplay(startTime, endTime);
+    // Switch to form view
+    showBookingForm(startTime, endTime);
     
-    // Enable submit button
-    const submitBtn = document.querySelector('.submit-btn');
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Reserve Room';
+    // Update time slots to show selection
+    generateTimeSlots();
 }
 
-function updateSelectedTimeDisplay(startTime, endTime) {
-    const display = document.getElementById('selectedTimeDisplay');
-    const timeText = document.getElementById('selectedTimeText');
+function showBookingForm(startTime, endTime) {
+    // Hide time slots view, show form view
+    document.getElementById('timeSlotsView').style.display = 'none';
+    document.getElementById('bookingFormView').style.display = 'block';
     
-    if (startTime && endTime) {
-        timeText.textContent = `${convertTo12Hour(startTime)} - ${convertTo12Hour(endTime)}`;
-        display.style.display = 'block';
-    } else {
-        display.style.display = 'none';
+    // Update selected date and time display
+    const selectedDateText = document.getElementById('selectedDateText');
+    const selectedTimeRange = document.getElementById('selectedTimeRange');
+    
+    if (selectedDate) {
+        const options = { weekday: 'long', month: 'long', day: 'numeric' };
+        selectedDateText.textContent = selectedDate.toLocaleDateString('en-US', options);
     }
+    
+    selectedTimeRange.textContent = `${convertTo12Hour(startTime)} - ${convertTo12Hour(endTime)}`;
+    
+    // Focus on name field
+    document.getElementById('name').focus();
 }
 
 function clearTimeSelection() {
     selectedTimeSlot = null;
     document.getElementById('startTime').value = '';
     document.getElementById('endTime').value = '';
-    generateTimeSlots();
-    updateSelectedTimeDisplay(null, null);
     
-    // Disable submit button
-    const submitBtn = document.querySelector('.submit-btn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Select a time to continue';
+    // Switch back to time slots view
+    document.getElementById('timeSlotsView').style.display = 'block';
+    document.getElementById('bookingFormView').style.display = 'none';
+    
+    // Clear form
+    document.getElementById('reservationForm').reset();
+    
+    generateTimeSlots();
 }
 
 // Time format conversion functions
@@ -579,12 +584,9 @@ async function handleReservationSubmit() {
         showSuccessModal(result);
         
         // Reset form and selections
-        form.reset();
-        clearTimeSelection();
-        selectedDate = null;
-        generateCalendar();
-        updateSelectedDateDisplay();
-        generateTimeSlots();
+        clearTimeSelection();  // This will reset form and switch back to time slots view
+        
+        // Don't clear the selected date - user might want to book another time on same day
         
         // Reload reservations
         showLoadingScreen();
@@ -656,30 +658,25 @@ function displayReservations(todayReservations) {
     const container = document.getElementById('reservationsList');
     
     if (todayReservations.length === 0) {
-        container.innerHTML = '<div class="empty-state">No reservations for today</div>';
+        container.innerHTML = '<div class="empty-state-compact">No reservations yet</div>';
         return;
     }
     
     container.innerHTML = todayReservations.map(reservation => `
-        <div class="reservation-card" data-id="${reservation.id}">
-            <div class="reservation-header">
-                <span class="reservation-time">${convertTo12Hour(reservation.startTime)} - ${convertTo12Hour(reservation.endTime)} CST</span>
-                <span class="reservation-duration">${reservation.duration} min</span>
+        <div class="reservation-card-compact" data-id="${reservation.id}">
+            <div class="reservation-time-block">
+                <span class="reservation-time-compact">${convertTo12Hour(reservation.startTime)}</span>
+                <span class="reservation-duration-compact">${reservation.duration}m</span>
             </div>
-            <div class="reservation-body">
-                <div class="reservation-name">${reservation.name}</div>
-                ${reservation.purpose ? `<div class="reservation-purpose">${reservation.purpose}</div>` : ''}
-                ${reservation.googleEventId ? 
-                    `<span class="google-calendar-badge">
-                        📅 Added to Google Calendar
-                    </span>` : ''
-                }
+            <div class="reservation-info-compact">
+                <div class="reservation-name-compact">${reservation.name}</div>
+                ${reservation.purpose ? `<div class="reservation-purpose-compact">${reservation.purpose}</div>` : ''}
             </div>
-            <div class="reservation-actions">
-                <button class="btn-delete" onclick="deleteReservation('${reservation.id}')">
-                    Cancel Reservation
-                </button>
-            </div>
+            <button class="btn-delete-compact" onclick="deleteReservation('${reservation.id}')" title="Cancel">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                    <path d="M18 6L6 18M6 6l12 12"></path>
+                </svg>
+            </button>
         </div>
     `).join('');
 }

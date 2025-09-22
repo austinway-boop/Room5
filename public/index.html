@@ -29,15 +29,15 @@
 
         <!-- Main Content Grid -->
         <div class="calendly-main">
-            <!-- Left Panel - Booking Info -->
+            <!-- Left Panel - Info & Reservations -->
             <section class="calendly-left-panel">
                 <div class="booking-header">
-                    <h2>Book Your Session</h2>
-                    <p class="booking-description">Reserve time in The Film Room for your creative projects</p>
+                    <h2>The Film Room</h2>
+                    <p class="booking-description">Room 5 Booking System</p>
                 </div>
 
                 <div class="booking-info">
-                    <div class="info-card">
+                    <div class="info-card compact">
                         <div class="info-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="12" cy="12" r="10"></circle>
@@ -45,12 +45,11 @@
                             </svg>
                         </div>
                         <div class="info-content">
-                            <h3>Hours</h3>
-                            <p>Mon-Fri: Noon-8PM</p>
+                            <p><strong>Hours:</strong> Mon-Fri, 12-8pm</p>
                         </div>
                     </div>
 
-                    <div class="info-card">
+                    <div class="info-card compact">
                         <div class="info-icon">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -58,51 +57,24 @@
                             </svg>
                         </div>
                         <div class="info-content">
-                            <h3>Location</h3>
-                            <p>Room 5</p>
-                        </div>
-                    </div>
-
-                    <div class="info-card">
-                        <div class="info-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                                <line x1="3" y1="10" x2="21" y2="10"></line>
-                            </svg>
-                        </div>
-                        <div class="info-content">
-                            <h3>Duration</h3>
-                            <p>30 min slots</p>
+                            <p><strong>Location:</strong> Room 5</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="booking-form-section">
-                    <h3>Your Information</h3>
-                    <form id="reservationForm">
-                        <div class="form-group">
-                            <label for="name">Name</label>
-                            <input type="text" id="name" name="name" required placeholder="Enter your full name">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="email">Email</label>
-                            <input type="email" id="email" name="email" required placeholder="you@example.com">
-                        </div>
-
-                        <div class="form-group">
-                            <label for="purpose">Purpose / Project</label>
-                            <textarea id="purpose" name="purpose" rows="3" placeholder="What will you be working on?"></textarea>
-                        </div>
-
-                        <!-- Hidden time inputs will be populated by time slot selection -->
-                        <input type="hidden" id="startTime" name="startTime">
-                        <input type="hidden" id="endTime" name="endTime">
-
-                        <button type="submit" class="submit-btn" disabled>
-                            Select a time to continue
+                <!-- Reservations List -->
+                <div class="reservations-panel">
+                    <div class="panel-header">
+                        <h3>Today's Reservations</h3>
+                        <button class="refresh-btn-small" onclick="loadReservations()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                                <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                            </svg>
                         </button>
-                    </form>
+                    </div>
+                    <div id="reservationsList" class="reservations-list-compact">
+                        <!-- Reservations will be displayed here -->
+                    </div>
                 </div>
             </section>
 
@@ -116,56 +88,87 @@
                     <!-- Calendar will be generated here -->
                 </div>
                 <div class="calendar-navigation">
-                    <button id="prevMonth" class="calendar-nav-btn">←</button>
-                    <button id="nextMonth" class="calendar-nav-btn">→</button>
+                    <button id="prevMonth" class="calendar-nav-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M15 18l-6-6 6-6"></path>
+                        </svg>
+                    </button>
+                    <button id="nextMonth" class="calendar-nav-btn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                            <path d="M9 18l6-6-6-6"></path>
+                        </svg>
+                    </button>
                 </div>
             </section>
 
-            <!-- Right Panel - Time Slots -->
+            <!-- Right Panel - Time Slots & Form -->
             <section class="calendly-right-panel">
-                <div class="time-header">
-                    <h3 id="selectedDateDisplay">Select a date</h3>
-                    <p class="time-zone-label">Times in CST</p>
-                </div>
-                <div class="time-slots-container" id="timeSlotsContainer">
-                    <div class="no-date-selected">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <path d="M12 6v6l4 2"></path>
-                        </svg>
-                        <p>Please select a date from the calendar to see available times</p>
+                <!-- Time Slots View -->
+                <div id="timeSlotsView">
+                    <div class="time-header">
+                        <h3 id="selectedDateDisplay">Select a date</h3>
+                        <p class="time-zone-label">Times in CST</p>
+                    </div>
+                    <div class="time-slots-container" id="timeSlotsContainer">
+                        <div class="no-date-selected">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <path d="M12 6v6l4 2"></path>
+                            </svg>
+                            <p>Please select a date from the calendar to see available times</p>
+                        </div>
                     </div>
                 </div>
                 
-                <!-- Selected Time Display -->
-                <div class="selected-time-display" id="selectedTimeDisplay" style="display: none;">
-                    <div class="selected-time-header">
-                        <h4>Selected Time</h4>
-                        <button class="change-time-btn" onclick="clearTimeSelection()">Change</button>
+                <!-- Booking Form View (hidden initially) -->
+                <div id="bookingFormView" style="display: none;">
+                    <div class="form-header">
+                        <button class="back-btn" onclick="clearTimeSelection()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                <path d="M19 12H5M12 19l-7-7 7-7"></path>
+                            </svg>
+                            Back
+                        </button>
+                        <h3>Enter Details</h3>
                     </div>
-                    <div class="selected-time-info">
-                        <span id="selectedTimeText"></span>
-                        <span class="duration-badge">30 min</span>
+                    
+                    <div class="selected-time-card">
+                        <div class="time-card-header">
+                            <span id="selectedDateText"></span>
+                        </div>
+                        <div class="time-card-body">
+                            <span id="selectedTimeRange"></span>
+                            <span class="duration-badge">30 min</span>
+                        </div>
                     </div>
+
+                    <form id="reservationForm">
+                        <div class="form-group">
+                            <label for="name">Name *</label>
+                            <input type="text" id="name" name="name" required placeholder="Your full name">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="email">Email *</label>
+                            <input type="email" id="email" name="email" required placeholder="you@example.com">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="purpose">Purpose / Project</label>
+                            <textarea id="purpose" name="purpose" rows="3" placeholder="What will you be working on?"></textarea>
+                        </div>
+
+                        <!-- Hidden time inputs -->
+                        <input type="hidden" id="startTime" name="startTime">
+                        <input type="hidden" id="endTime" name="endTime">
+
+                        <button type="submit" class="submit-btn">
+                            Confirm Booking
+                        </button>
+                    </form>
                 </div>
             </section>
         </div>
-
-        <!-- Today's Reservations (Below main grid) -->
-        <section class="reservations-summary">
-            <div class="summary-header">
-                <h2>Today's Reservations</h2>
-                <button class="refresh-btn" onclick="loadReservations()">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                        <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                    </svg>
-                    Refresh
-                </button>
-            </div>
-            <div id="reservationsList" class="reservations-list">
-                <!-- Reservations will be displayed here -->
-            </div>
-        </section>
 
         <!-- Connection Status -->
         <div class="connection-status" id="connectionStatus">
