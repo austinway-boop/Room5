@@ -3,7 +3,9 @@ const API_URL = window.location.hostname === 'localhost' ? 'http://localhost:300
 const WS_URL = window.location.hostname === 'localhost' ? 'ws://localhost:8080' : null;
 
 // State
-let selectedDate = new Date();
+let selectedDate = null;
+let selectedMonth = new Date();
+let selectedTimeSlot = null;
 let reservations = [];
 let ws = null;
 let isGoogleAuthenticated = false;
@@ -50,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show loading screen immediately
     showLoadingScreen();
     
-    initializeDateSelector();
+    initializeCalendar();
     initializeForm();
     initializeWebSocket();
     
@@ -62,8 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             hideAuthOverlay();
             // Load all data before allowing actions
-            await loadReservations();
-            generateTimeline();
+            await loadAllReservations();
+            generateCalendar();
             isDataLoaded = true;
             hideLoadingScreen();
         }
@@ -190,7 +192,254 @@ async function handleGoogleAuth() {
     }
 }
 
-// Removed duplicate auth callback check - already handled in DOMContentLoaded
+// Calendar Functions
+function initializeCalendar() {
+    // Calendar navigation
+    document.getElementById('prevMonth').addEventListener('click', () => {
+        selectedMonth.setMonth(selectedMonth.getMonth() - 1);
+        generateCalendar();
+    });
+    
+    document.getElementById('nextMonth').addEventListener('click', () => {
+        selectedMonth.setMonth(selectedMonth.getMonth() + 1);
+        generateCalendar();
+    });
+    
+    generateCalendar();
+}
+
+function generateCalendar() {
+    const calendarGrid = document.getElementById('calendarGrid');
+    const monthYearDisplay = document.getElementById('monthYearDisplay');
+    
+    // Clear previous calendar
+    calendarGrid.innerHTML = '';
+    
+    // Update month/year display
+    const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                       'July', 'August', 'September', 'October', 'November', 'December'];
+    monthYearDisplay.textContent = `${monthNames[selectedMonth.getMonth()]} ${selectedMonth.getFullYear()}`;
+    
+    // Add day headers
+    const dayHeaders = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    dayHeaders.forEach(day => {
+        const header = document.createElement('div');
+        header.className = 'calendar-day-header';
+        header.textContent = day;
+        calendarGrid.appendChild(header);
+    });
+    
+    // Get first day of month and number of days
+    const firstDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
+    const lastDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0);
+    const prevLastDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 0);
+    
+    const firstDayOfWeek = firstDay.getDay();
+    const daysInMonth = lastDay.getDate();
+    const daysInPrevMonth = prevLastDay.getDate();
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    // Add previous month's trailing days
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+        const day = daysInPrevMonth - i;
+        const dayEl = createCalendarDay(day, -1);
+        calendarGrid.appendChild(dayEl);
+    }
+    
+    // Add current month's days
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dayEl = createCalendarDay(day, 0);
+        calendarGrid.appendChild(dayEl);
+    }
+    
+    // Add next month's leading days
+    const totalCells = calendarGrid.children.length - 7; // Subtract header row
+    const remainingCells = 35 - totalCells; // 5 weeks * 7 days
+    for (let day = 1; day <= remainingCells; day++) {
+        const dayEl = createCalendarDay(day, 1);
+        calendarGrid.appendChild(dayEl);
+    }
+}
+
+function createCalendarDay(day, monthOffset) {
+    const dayEl = document.createElement('div');
+    dayEl.className = 'calendar-day';
+    dayEl.textContent = day;
+    
+    const date = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + monthOffset, day);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    date.setHours(0, 0, 0, 0);
+    
+    // Add classes based on date
+    if (monthOffset !== 0) {
+        dayEl.classList.add('other-month');
+    }
+    
+    if (date < today) {
+        dayEl.classList.add('disabled');
+    } else {
+        if (date.getTime() === today.getTime()) {
+            dayEl.classList.add('today');
+        }
+        
+        if (selectedDate && date.getTime() === selectedDate.getTime()) {
+            dayEl.classList.add('selected');
+        }
+        
+        // Check if date has reservations
+        if (hasReservations(date)) {
+            dayEl.classList.add('has-reservations');
+        }
+        
+        // Add click handler
+        dayEl.addEventListener('click', () => selectDate(date));
+    }
+    
+    return dayEl;
+}
+
+function hasReservations(date) {
+    const dateStr = formatDate(date);
+    return reservations.some(r => r.date === dateStr);
+}
+
+function selectDate(date) {
+    selectedDate = date;
+    generateCalendar();
+    updateSelectedDateDisplay();
+    generateTimeSlots();
+    loadReservations();
+}
+
+function updateSelectedDateDisplay() {
+    const display = document.getElementById('selectedDateDisplay');
+    if (selectedDate) {
+        const options = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
+        display.textContent = selectedDate.toLocaleDateString('en-US', options);
+    } else {
+        display.textContent = 'Select a date';
+    }
+}
+
+// Time Slots
+function generateTimeSlots() {
+    const container = document.getElementById('timeSlotsContainer');
+    
+    if (!selectedDate) {
+        container.innerHTML = `
+            <div class="no-date-selected">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 6v6l4 2"></path>
+                </svg>
+                <p>Please select a date from the calendar to see available times</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    // Generate 30-minute slots from 8 AM to 10 PM
+    for (let hour = 8; hour <= 21; hour++) {
+        for (let minutes = 0; minutes < 60; minutes += 30) {
+            // Don't create 10:00 PM slot (last slot should be 9:30 PM)
+            if (hour === 21 && minutes === 30) break;
+            
+            const startTime = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            const endTime = minutes === 30 ? 
+                `${String(hour + 1).padStart(2, '0')}:00` : 
+                `${String(hour).padStart(2, '0')}:30`;
+            
+            const slotBtn = createTimeSlotButton(startTime, endTime);
+            container.appendChild(slotBtn);
+        }
+    }
+}
+
+function createTimeSlotButton(startTime, endTime) {
+    const btn = document.createElement('button');
+    btn.className = 'time-slot-btn';
+    btn.textContent = convertTo12Hour(startTime);
+    
+    // Check if slot is available
+    const isAvailable = checkSlotAvailability(startTime, endTime);
+    
+    if (!isAvailable) {
+        btn.classList.add('disabled');
+        btn.disabled = true;
+    } else {
+        btn.addEventListener('click', () => selectTimeSlot(startTime, endTime));
+    }
+    
+    // Mark selected slot
+    if (selectedTimeSlot && selectedTimeSlot.startTime === startTime) {
+        btn.classList.add('selected');
+    }
+    
+    return btn;
+}
+
+function checkSlotAvailability(startTime, endTime) {
+    if (!selectedDate) return false;
+    
+    const dateStr = formatDate(selectedDate);
+    const dayReservations = reservations.filter(r => r.date === dateStr);
+    
+    // Check if this slot conflicts with any existing reservation
+    return !dayReservations.some(reservation => {
+        const resStart = reservation.startTime;
+        const resEnd = reservation.endTime;
+        
+        // Check if reservation overlaps with this time slot
+        return (resStart < endTime && resEnd > startTime);
+    });
+}
+
+function selectTimeSlot(startTime, endTime) {
+    selectedTimeSlot = { startTime, endTime };
+    
+    // Update hidden form fields
+    document.getElementById('startTime').value = startTime;
+    document.getElementById('endTime').value = endTime;
+    
+    // Update UI
+    generateTimeSlots();
+    updateSelectedTimeDisplay(startTime, endTime);
+    
+    // Enable submit button
+    const submitBtn = document.querySelector('.submit-btn');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Reserve Room';
+}
+
+function updateSelectedTimeDisplay(startTime, endTime) {
+    const display = document.getElementById('selectedTimeDisplay');
+    const timeText = document.getElementById('selectedTimeText');
+    
+    if (startTime && endTime) {
+        timeText.textContent = `${convertTo12Hour(startTime)} - ${convertTo12Hour(endTime)}`;
+        display.style.display = 'block';
+    } else {
+        display.style.display = 'none';
+    }
+}
+
+function clearTimeSelection() {
+    selectedTimeSlot = null;
+    document.getElementById('startTime').value = '';
+    document.getElementById('endTime').value = '';
+    generateTimeSlots();
+    updateSelectedTimeDisplay(null, null);
+    
+    // Disable submit button
+    const submitBtn = document.querySelector('.submit-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Select a time to continue';
+}
 
 // Time format conversion functions
 function convertTo12Hour(time24) {
@@ -222,67 +471,7 @@ function convertTo24Hour(time12) {
     return `${String(hours).padStart(2, '0')}:${minutes}`;
 }
 
-// Date Selector
-function initializeDateSelector() {
-    const dateInput = document.getElementById('selectedDate');
-    const prevBtn = document.getElementById('prevDay');
-    const nextBtn = document.getElementById('nextDay');
-    
-    // Set initial date
-    updateDateInput();
-    
-    dateInput.addEventListener('change', async (e) => {
-        selectedDate = new Date(e.target.value + 'T00:00:00');
-        showLoadingScreen();
-        await loadReservations();
-        generateTimeline();
-        hideLoadingScreen();
-    });
-    
-    prevBtn.addEventListener('click', async () => {
-        selectedDate.setDate(selectedDate.getDate() - 1);
-        updateDateInput();
-        showLoadingScreen();
-        await loadReservations();
-        generateTimeline();
-        hideLoadingScreen();
-    });
-    
-    nextBtn.addEventListener('click', async () => {
-        selectedDate.setDate(selectedDate.getDate() + 1);
-        updateDateInput();
-        showLoadingScreen();
-        await loadReservations();
-        generateTimeline();
-        hideLoadingScreen();
-    });
-}
-
-function updateDateInput() {
-    const dateInput = document.getElementById('selectedDate');
-    dateInput.value = formatDate(selectedDate);
-    
-    // Add day of week display
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const dayOfWeek = dayNames[selectedDate.getDay()];
-    const month = monthNames[selectedDate.getMonth()];
-    const day = selectedDate.getDate();
-    const year = selectedDate.getFullYear();
-    
-    // Update or create day display element
-    let dateDisplay = document.querySelector('.date-display');
-    if (!dateDisplay) {
-        // Create the day display if it doesn't exist
-        const container = document.querySelector('.date-selector');
-        dateDisplay = document.createElement('div');
-        dateDisplay.className = 'date-display';
-        dateDisplay.style.cssText = 'text-align: center; font-weight: 600; color: #4F46E5; margin-top: 8px; font-size: 14px;';
-        container.appendChild(dateDisplay);
-    }
-    dateDisplay.textContent = `${dayOfWeek}, ${month} ${day}, ${year}`;
-}
-
+// Date formatting
 function formatDate(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -293,61 +482,11 @@ function formatDate(date) {
 // Form Handling
 function initializeForm() {
     const form = document.getElementById('reservationForm');
-    const startTimeInput = document.getElementById('startTime');
-    const endTimeInput = document.getElementById('endTime');
-    
-    // Update duration display
-    startTimeInput.addEventListener('change', updateDurationDisplay);
-    endTimeInput.addEventListener('change', updateDurationDisplay);
     
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
         await handleReservationSubmit();
     });
-}
-
-function updateDurationDisplay() {
-    const startTime = document.getElementById('startTime').value;
-    const endTime = document.getElementById('endTime').value;
-    const durationText = document.getElementById('durationText');
-    
-    if (!startTime || !endTime) {
-        durationText.textContent = '--';
-        durationText.classList.remove('warning');
-        return;
-    }
-    
-    const start = new Date(`2000-01-01T${startTime}`);
-    const end = new Date(`2000-01-01T${endTime}`);
-    const diffMinutes = (end - start) / (1000 * 60);
-    
-    if (diffMinutes <= 0) {
-        durationText.textContent = 'Invalid time range';
-        durationText.classList.add('warning');
-        return;
-    }
-    
-    const hours = Math.floor(diffMinutes / 60);
-    const minutes = diffMinutes % 60;
-    
-    let durationString = '';
-    if (hours > 0) {
-        durationString += `${hours} hour${hours > 1 ? 's' : ''}`;
-    }
-    if (minutes > 0) {
-        if (hours > 0) durationString += ' ';
-        durationString += `${minutes} minute${minutes > 1 ? 's' : ''}`;
-    }
-    
-    durationText.textContent = durationString;
-    
-    // Add warning for durations over 30 minutes
-    if (diffMinutes > 30) {
-        durationText.classList.add('warning');
-        durationText.textContent += ' (Consider limiting to 30 minutes)';
-    } else {
-        durationText.classList.remove('warning');
-    }
 }
 
 async function handleReservationSubmit() {
@@ -361,6 +500,12 @@ async function handleReservationSubmit() {
     // Check if data is loaded
     if (!isDataLoaded) {
         alert('Please wait for the calendar to load completely.');
+        return;
+    }
+    
+    // Check if date and time are selected
+    if (!selectedDate || !selectedTimeSlot) {
+        alert('Please select a date and time for your reservation.');
         return;
     }
     
@@ -409,14 +554,18 @@ async function handleReservationSubmit() {
         // Show success modal
         showSuccessModal(result);
         
-        // Reset form
+        // Reset form and selections
         form.reset();
-        updateDurationDisplay();
+        clearTimeSelection();
+        selectedDate = null;
+        generateCalendar();
+        updateSelectedDateDisplay();
+        generateTimeSlots();
         
-        // Reload reservations with loading indicator
+        // Reload reservations
         showLoadingScreen();
+        await loadAllReservations();
         await loadReservations();
-        generateTimeline();
         hideLoadingScreen();
         
     } catch (error) {
@@ -425,101 +574,69 @@ async function handleReservationSubmit() {
     }
 }
 
-// Timeline Generation
-function generateTimeline() {
-    const timeline = document.getElementById('timeline');
-    timeline.innerHTML = '';
-    
-    // Generate time slots from 8 AM to 10 PM
-    for (let hour = 8; hour <= 22; hour++) {
-        for (let minutes = 0; minutes < 60; minutes += 30) {
-            const timeString = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-            const endTime = minutes === 30 ? 
-                `${String(hour + 1).padStart(2, '0')}:00` : 
-                `${String(hour).padStart(2, '0')}:30`;
-            
-            const slot = createTimeSlot(timeString, endTime);
-            timeline.appendChild(slot);
-        }
-    }
-}
-
-function createTimeSlot(startTime, endTime) {
-    const slot = document.createElement('div');
-    slot.className = 'time-slot';
-    
-    const timeLabel = document.createElement('div');
-    timeLabel.className = 'time-label';
-    timeLabel.textContent = convertTo12Hour(startTime);  // Display in 12-hour format
-    
-    const slotStatus = document.createElement('div');
-    slotStatus.className = 'slot-status';
-    
-    // Check if this slot is reserved
-    const reservation = getReservationForTimeSlot(startTime, endTime);
-    
-    if (reservation) {
-        slotStatus.classList.add('reserved');
-        slotStatus.innerHTML = `
-            <div class="reservation-info">
-                <div class="reservation-name">${reservation.name}</div>
-                ${reservation.purpose ? `<div class="reservation-purpose">${reservation.purpose}</div>` : ''}
-            </div>
-        `;
-    } else {
-        slotStatus.classList.add('available');
-        slotStatus.innerHTML = '<span>Available</span>';
-        slotStatus.addEventListener('click', () => {
-            document.getElementById('startTime').value = startTime;
-            document.getElementById('endTime').value = endTime;
-            updateDurationDisplay();
-            document.getElementById('name').focus();
-        });
-    }
-    
-    slot.appendChild(timeLabel);
-    slot.appendChild(slotStatus);
-    
-    return slot;
-}
-
-function getReservationForTimeSlot(slotStart, slotEnd) {
-    return reservations.find(reservation => {
-        const resStart = reservation.startTime;
-        const resEnd = reservation.endTime;
-        
-        // Check if reservation overlaps with this time slot
-        return (resStart < slotEnd && resEnd > slotStart);
-    });
-}
-
 // Load Reservations
-async function loadReservations() {
+async function loadAllReservations() {
+    // Load all reservations for the current month
     try {
-        const response = await fetch(`${API_URL}/reservations?date=${formatDate(selectedDate)}`, {
+        const firstDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
+        const lastDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0);
+        
+        const allReservations = [];
+        
+        // Load each day's reservations
+        for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
+            const response = await fetch(`${API_URL}/reservations?date=${formatDate(d)}`, {
+                credentials: 'include'
+            });
+            
+            if (response.ok) {
+                const dayReservations = await response.json();
+                allReservations.push(...dayReservations.map(r => ({
+                    ...r,
+                    date: formatDate(d)
+                })));
+            }
+        }
+        
+        reservations = allReservations;
+    } catch (error) {
+        console.error('Error loading all reservations:', error);
+    }
+}
+
+async function loadReservations() {
+    // Load today's reservations for the summary
+    try {
+        const today = new Date();
+        const response = await fetch(`${API_URL}/reservations?date=${formatDate(today)}`, {
             credentials: 'include'
         });
+        
         if (!response.ok) {
             throw new Error('Failed to load reservations');
         }
         
-        reservations = await response.json();
-        displayReservations();
-        generateTimeline();
+        const todayReservations = await response.json();
+        displayReservations(todayReservations);
+        
+        // Also update the time slots if a date is selected
+        if (selectedDate) {
+            generateTimeSlots();
+        }
     } catch (error) {
         console.error('Error loading reservations:', error);
     }
 }
 
-function displayReservations() {
+function displayReservations(todayReservations) {
     const container = document.getElementById('reservationsList');
     
-    if (reservations.length === 0) {
-        container.innerHTML = '<div class="empty-state">No reservations for this date</div>';
+    if (todayReservations.length === 0) {
+        container.innerHTML = '<div class="empty-state">No reservations for today</div>';
         return;
     }
     
-    container.innerHTML = reservations.map(reservation => `
+    container.innerHTML = todayReservations.map(reservation => `
         <div class="reservation-card" data-id="${reservation.id}">
             <div class="reservation-header">
                 <span class="reservation-time">${convertTo12Hour(reservation.startTime)} - ${convertTo12Hour(reservation.endTime)} CST</span>
@@ -571,7 +688,14 @@ async function deleteReservation(id) {
         console.log('Deletion result:', result);
         
         // Reload reservations
+        await loadAllReservations();
         await loadReservations();
+        
+        // Update calendar and time slots
+        generateCalendar();
+        if (selectedDate) {
+            generateTimeSlots();
+        }
         
         // Show success message
         if (result.message) {
@@ -590,7 +714,10 @@ function initializeWebSocket() {
         console.log('WebSocket disabled in production environment');
         updateConnectionStatus(false);
         // Poll for updates in production instead
-        setInterval(loadReservations, 10000); // Refresh every 10 seconds
+        setInterval(() => {
+            loadAllReservations();
+            loadReservations();
+        }, 10000); // Refresh every 10 seconds
         return;
     }
     
@@ -621,7 +748,10 @@ function initializeWebSocket() {
         console.log('WebSocket not available:', error);
         updateConnectionStatus(false);
         // Fall back to polling
-        setInterval(loadReservations, 10000);
+        setInterval(() => {
+            loadAllReservations();
+            loadReservations();
+        }, 10000);
     }
 }
 
@@ -632,7 +762,12 @@ function handleWebSocketMessage(message) {
     if (message.type === 'reservation_created' || 
         message.type === 'reservation_updated' || 
         message.type === 'reservation_deleted') {
+        loadAllReservations();
         loadReservations();
+        generateCalendar();
+        if (selectedDate) {
+            generateTimeSlots();
+        }
     }
 }
 
@@ -685,7 +820,7 @@ function showSuccessModal(reservation) {
     // Handle both string messages and reservation objects
     if (typeof reservation === 'string') {
         details.innerHTML = `
-            <div style="padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem; color: #14532d; font-weight: 600;">
+            <div style="padding: 0.75rem; background: #e7f5f0; border-radius: 0.5rem; color: #004834; font-weight: 600;">
                 ✅ ${reservation}
             </div>
         `;
@@ -697,7 +832,7 @@ function showSuccessModal(reservation) {
                 <strong>Duration:</strong> ${reservation.duration} minutes<br>
                 ${reservation.purpose ? `<strong>Purpose:</strong> ${reservation.purpose}<br>` : ''}
                 ${reservation.googleCalendarAdded ? 
-                    `<br><div style="padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem; color: #14532d; font-weight: 600;">
+                    `<br><div style="padding: 0.75rem; background: #e7f5f0; border-radius: 0.5rem; color: #004834; font-weight: 600;">
                         ✅ Event added to Google Calendar!
                     </div>` : 
                     isGoogleAuthenticated ? 
