@@ -172,7 +172,7 @@ class UpstashSessionStore extends session.Store {
   }
 
   async set(sid, sess, callback) {
-    if (this.useMemory) {
+    if (this.useMemory || !this.client) {
       memorySessions.set(this.prefix + sid, sess);
       callback && callback();
       return;
@@ -184,15 +184,17 @@ class UpstashSessionStore extends session.Store {
       await this.client.set(key, JSON.stringify(sess), { ex: ttl });
       callback && callback();
     } catch (err) {
-      console.log('Redis session set error, switching to memory:', err.message);
-      this.useMemory = true;
+      if (!this.useMemory) {
+        console.log('Redis session set error, switching to memory:', err.message);
+        this.useMemory = true;
+      }
       memorySessions.set(this.prefix + sid, sess);
       callback && callback();
     }
   }
 
   async destroy(sid, callback) {
-    if (this.useMemory) {
+    if (this.useMemory || !this.client) {
       memorySessions.delete(this.prefix + sid);
       callback && callback();
       return;
@@ -203,8 +205,10 @@ class UpstashSessionStore extends session.Store {
       await this.client.del(key);
       callback && callback();
     } catch (err) {
-      console.log('Redis session destroy error, switching to memory:', err.message);
-      this.useMemory = true;
+      if (!this.useMemory) {
+        console.log('Redis session destroy error, switching to memory:', err.message);
+        this.useMemory = true;
+      }
       memorySessions.delete(this.prefix + sid);
       callback && callback();
     }
