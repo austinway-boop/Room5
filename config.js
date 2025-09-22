@@ -20,7 +20,7 @@ const getRedirectUri = () => {
 
 module.exports = {
     google: {
-        clientId: process.env.GOOGLE_CLIENT_ID || '640498614163-2jq26ucauvqn57m6r3rlv0glauarriai.apps.googleusercontent.com',
+        clientId: process.env.GOOGLE_CLIENT_ID || '640498614163-8bo1bbgogrgardvsjme60f177770qn6n.apps.googleusercontent.com',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || 'your_secret_here',
         redirectUri: getRedirectUri(),
         calendarId: process.env.GOOGLE_CALENDAR_ID || 'primary'
