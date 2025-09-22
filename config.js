@@ -31,5 +31,10 @@ module.exports = {
     server: {
         port: process.env.PORT || 3000,
         wsPort: process.env.WS_PORT || 8080
+    },
+    redis: {
+        url: process.env.dataforroom5_REDIS_URL || process.env.REDIS_URL,
+        restApiUrl: process.env.dataforroom5_KV_REST_API_URL,
+        restApiToken: process.env.dataforroom5_KV_REST_API_TOKEN
     }
 };

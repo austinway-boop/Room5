@@ -1,6 +1,5 @@
 const config = require('./config');
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const WebSocket = require('ws');
 const cors = require('cors');
 const { google } = require('googleapis');
@@ -9,9 +8,28 @@ const moment = require('moment');
 const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
+const { Redis } = require('@upstash/redis');
+const RedisStore = require('connect-redis').default;
 
 const app = express();
 const PORT = config.server.port;
+
+// Initialize Upstash Redis client
+let redis = null;
+try {
+  if (config.redis.restApiUrl && config.redis.restApiToken) {
+    redis = new Redis({
+      url: config.redis.restApiUrl,
+      token: config.redis.restApiToken
+    });
+    console.log('Connected to Upstash Redis successfully');
+  } else {
+    console.log('Redis credentials not found, using memory storage (development only)');
+  }
+} catch (error) {
+  console.error('Failed to connect to Redis:', error);
+  console.log('Falling back to memory storage');
+}
 
 // Middleware
 app.use(cors({
@@ -36,113 +54,8 @@ if (!process.env.VERCEL) {
   });
 }
 
-// Database setup (use /tmp in Vercel for temporary storage)
-const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
-const db = new sqlite3.Database(dbPath);
-
-// Create tables
-db.serialize(() => {
-  // Create reservations table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS reservations (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      date TEXT NOT NULL,
-      startTime TEXT NOT NULL,
-      endTime TEXT NOT NULL,
-      duration INTEGER NOT NULL,
-      purpose TEXT,
-      googleEventId TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create users table for storing Google tokens
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      name TEXT,
-      google_tokens TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Create sessions table for Vercel persistence
-  db.run(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      sid TEXT PRIMARY KEY,
-      sess TEXT NOT NULL,
-      expire INTEGER NOT NULL
-    )
-  `);
-});
-
-// Custom SQLite session store for Vercel
-const Store = session.Store || session.session.Store;
-
-class SQLiteStore extends Store {
-  constructor(db) {
-    super();
-    this.db = db;
-  }
-
-  get(sid, callback) {
-    this.db.get('SELECT sess FROM sessions WHERE sid = ? AND expire > ?', 
-      [sid, Date.now()], 
-      (err, row) => {
-        if (err) return callback(err);
-        if (!row) return callback();
-        try {
-          callback(null, JSON.parse(row.sess));
-        } catch (e) {
-          callback(e);
-        }
-      }
-    );
-  }
-
-  set(sid, sess, callback) {
-    const expire = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
-    const sessJson = JSON.stringify(sess);
-    this.db.run(
-      'INSERT OR REPLACE INTO sessions (sid, sess, expire) VALUES (?, ?, ?)',
-      [sid, sessJson, expire],
-      callback || (() => {})
-    );
-  }
-
-  destroy(sid, callback) {
-    this.db.run('DELETE FROM sessions WHERE sid = ?', [sid], callback || (() => {}));
-  }
-
-  touch(sid, sess, callback) {
-    const expire = Date.now() + (24 * 60 * 60 * 1000);
-    this.db.run(
-      'UPDATE sessions SET expire = ? WHERE sid = ?',
-      [expire, sid],
-      callback || (() => {})
-    );
-  }
-
-  all(callback) {
-    this.db.all('SELECT * FROM sessions WHERE expire > ?', [Date.now()], (err, rows) => {
-      if (err) return callback(err);
-      callback(null, rows || []);
-    });
-  }
-
-  clear(callback) {
-    this.db.run('DELETE FROM sessions', callback || (() => {}));
-  }
-}
-
-// Session configuration with SQLite store
-const sessionStore = new SQLiteStore(db);
-
-app.use(session({
-  store: sessionStore,
+// Session configuration with Redis store (if available)
+let sessionConfig = {
   secret: config.session.secret,
   resave: false,
   saveUninitialized: false,
@@ -152,7 +65,31 @@ app.use(session({
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
-}));
+};
+
+// Use Redis for session storage if available
+if (redis) {
+  sessionConfig.store = new RedisStore({
+    client: {
+      get: async (key) => {
+        const val = await redis.get(key);
+        return val ? JSON.parse(val) : null;
+      },
+      set: async (key, val) => {
+        await redis.set(key, JSON.stringify(val), { ex: 86400 }); // 24 hours
+      },
+      del: async (key) => {
+        await redis.del(key);
+      }
+    },
+    prefix: 'sess:'
+  });
+  console.log('Using Redis for session storage');
+} else {
+  console.log('Using memory for session storage (sessions will not persist)');
+}
+
+app.use(session(sessionConfig));
 
 // Google OAuth2 Configuration
 const oauth2Client = new google.auth.OAuth2(
@@ -165,20 +102,38 @@ const oauth2Client = new google.auth.OAuth2(
 console.log('====================================');
 console.log('OAuth Configuration:');
 console.log('Redirect URI:', config.google.redirectUri);
-console.log('VERCEL_URL:', process.env.VERCEL_URL);
 console.log('Client ID:', config.google.clientId);
+console.log('Redis Available:', !!redis);
 console.log('====================================');
 
 // Add a debug endpoint to check configuration
-app.get('/debug/config', (req, res) => {
+app.get('/debug/config', async (req, res) => {
+  let redisStatus = 'Not connected';
+  let userCount = 0;
+  let reservationCount = 0;
+  
+  if (redis) {
+    try {
+      redisStatus = 'Connected';
+      const users = await redis.keys('user:*');
+      const reservations = await redis.keys('reservation:*');
+      userCount = users ? users.length : 0;
+      reservationCount = reservations ? reservations.length : 0;
+    } catch (error) {
+      redisStatus = 'Error: ' + error.message;
+    }
+  }
+  
   res.json({
     redirectUri: config.google.redirectUri,
-    vercelUrl: process.env.VERCEL_URL,
     clientId: config.google.clientId,
     sessionId: req.sessionID,
     hasSession: !!req.session,
     sessionUser: req.session?.user?.email || 'none',
-    message: 'Add this EXACT redirect URI to Google Cloud Console'
+    redisStatus,
+    userCount,
+    reservationCount,
+    message: 'System status and configuration'
   });
 });
 
@@ -333,28 +288,23 @@ app.get('/auth/google/callback', async (req, res) => {
     const userInfo = await oauth2.userinfo.get();
     console.log('User info retrieved:', userInfo.data.email);
     
-    // Store user and tokens in database (persistent storage)
+    // Store user and tokens in Redis
     const userId = uuidv4();
     
-    // Save to database for persistence
-    await new Promise((resolve, reject) => {
-      db.run(
-        `INSERT OR REPLACE INTO users (id, email, name, google_tokens) VALUES (
-          COALESCE((SELECT id FROM users WHERE email = ?), ?),
-          ?, ?, ?
-        )`,
-        [userInfo.data.email, userId, userInfo.data.email, userInfo.data.name, JSON.stringify(tokens)],
-        (err) => {
-          if (err) {
-            console.error('Error saving user to database:', err);
-            reject(err);
-          } else {
-            console.log('User saved to database successfully');
-            resolve();
-          }
-        }
-      );
-    });
+    if (redis) {
+      // Save to Redis for persistence
+      const userData = {
+        id: userId,
+        email: userInfo.data.email,
+        name: userInfo.data.name,
+        google_tokens: tokens,
+        created_at: new Date().toISOString()
+      };
+      
+      await redis.set(`user:${userInfo.data.email}`, JSON.stringify(userData));
+      await redis.set('latest_user', userInfo.data.email); // Track latest user for calendar operations
+      console.log('User saved to Redis successfully');
+    }
     
     // Store in session
     req.session.user = {
@@ -395,42 +345,38 @@ app.get('/auth/status', async (req, res) => {
     return;
   }
   
-  // If no session but we have a session ID, try to load from database
-  if (req.sessionID) {
+  // If no session but we have Redis, try to load the latest user
+  if (redis) {
     try {
-      const user = await new Promise((resolve, reject) => {
-        db.get(
-          'SELECT * FROM users ORDER BY created_at DESC LIMIT 1',
-          (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          }
-        );
-      });
-      
-      if (user) {
-        // Restore session from database
-        req.session.user = {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          tokens: JSON.parse(user.google_tokens)
-        };
-        
-        req.session.save((err) => {
-          if (err) console.error('Session restore error:', err);
-          res.json({
-            authenticated: true,
-            user: {
-              email: user.email,
-              name: user.name
-            }
+      const latestUserEmail = await redis.get('latest_user');
+      if (latestUserEmail) {
+        const userData = await redis.get(`user:${latestUserEmail}`);
+        if (userData) {
+          const user = JSON.parse(userData);
+          
+          // Restore session from Redis
+          req.session.user = {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            tokens: user.google_tokens
+          };
+          
+          req.session.save((err) => {
+            if (err) console.error('Session restore error:', err);
+            res.json({
+              authenticated: true,
+              user: {
+                email: user.email,
+                name: user.name
+              }
+            });
           });
-        });
-        return;
+          return;
+        }
       }
     } catch (error) {
-      console.error('Error loading user from database:', error);
+      console.error('Error loading user from Redis:', error);
     }
   }
   
@@ -440,13 +386,12 @@ app.get('/auth/status', async (req, res) => {
   });
 });
 
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', async (req, res) => {
   const email = req.session.user?.email;
-  if (email) {
-    // Clear from database
-    db.run('DELETE FROM users WHERE email = ?', [email], (err) => {
-      if (err) console.error('Error clearing user from database:', err);
-    });
+  
+  if (email && redis) {
+    // Don't delete from Redis, just clear the session
+    await redis.del('latest_user');
   }
   
   req.session.destroy((err) => {
@@ -456,55 +401,82 @@ app.post('/auth/logout', (req, res) => {
 });
 
 // Get all reservations
-app.get('/api/reservations', (req, res) => {
+app.get('/api/reservations', async (req, res) => {
   const { date } = req.query;
-  let query = 'SELECT * FROM reservations';
-  const params = [];
   
-  if (date) {
-    query += ' WHERE date = ?';
-    params.push(date);
-  }
-  
-  query += ' ORDER BY date, startTime';
-  
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+  try {
+    let reservations = [];
+    
+    if (redis) {
+      // Get all reservation keys from Redis
+      const keys = await redis.keys('reservation:*');
+      
+      if (keys && keys.length > 0) {
+        // Get all reservations
+        for (const key of keys) {
+          const data = await redis.get(key);
+          if (data) {
+            const reservation = JSON.parse(data);
+            if (!date || reservation.date === date) {
+              reservations.push(reservation);
+            }
+          }
+        }
+      }
+      
+      // Sort by date and start time
+      reservations.sort((a, b) => {
+        const dateCompare = a.date.localeCompare(b.date);
+        if (dateCompare !== 0) return dateCompare;
+        return a.startTime.localeCompare(b.startTime);
+      });
     }
-    res.json(rows);
-  });
+    
+    res.json(reservations);
+  } catch (error) {
+    console.error('Error fetching reservations:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Check availability
-app.post('/api/check-availability', (req, res) => {
+app.post('/api/check-availability', async (req, res) => {
   const { date, startTime, endTime, excludeId } = req.body;
   
-  let query = `
-    SELECT * FROM reservations 
-    WHERE date = ? 
-    AND (
-      (startTime < ? AND endTime > ?) OR
-      (startTime < ? AND endTime > ?) OR
-      (startTime >= ? AND endTime <= ?)
-    )
-  `;
-  
-  const params = [date, endTime, startTime, startTime, startTime, startTime, endTime];
-  
-  if (excludeId) {
-    query += ' AND id != ?';
-    params.push(excludeId);
-  }
-  
-  db.all(query, params, (err, rows) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+  try {
+    let conflicts = [];
+    
+    if (redis) {
+      // Get all reservations for the date
+      const keys = await redis.keys('reservation:*');
+      
+      if (keys && keys.length > 0) {
+        for (const key of keys) {
+          const data = await redis.get(key);
+          if (data) {
+            const reservation = JSON.parse(data);
+            
+            if (reservation.date === date && reservation.id !== excludeId) {
+              // Check for time overlap
+              const reqStart = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
+              const reqEnd = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
+              const resStart = moment(`${reservation.date} ${reservation.startTime}`, 'YYYY-MM-DD HH:mm');
+              const resEnd = moment(`${reservation.date} ${reservation.endTime}`, 'YYYY-MM-DD HH:mm');
+              
+              if ((reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart))) {
+                conflicts.push(reservation);
+              }
+            }
+          }
+        }
+      }
     }
-    res.json({ available: rows.length === 0, conflicts: rows });
-  });
+    
+    res.json({ available: conflicts.length === 0, conflicts });
+  } catch (error) {
+    console.error('Error checking availability:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Create reservation
@@ -527,32 +499,28 @@ app.post('/api/reservations', async (req, res) => {
   
   // Try to create Google Calendar event if user is authenticated
   console.log('Creating reservation - Session user:', req.session.user ? req.session.user.email : 'none');
-  console.log('Session has tokens:', req.session.user && req.session.user.tokens ? 'yes' : 'no');
   
-  // Always try to load from database first (Vercel sessions are unreliable)
+  // Try to get tokens from Redis or session
   let userTokens = null;
   
-  // Try to load from database
-  try {
-    const user = await new Promise((resolve, reject) => {
-      db.get(
-        'SELECT google_tokens, email FROM users ORDER BY created_at DESC LIMIT 1',
-        (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
+  if (redis) {
+    try {
+      // Get the latest authenticated user from Redis
+      const latestUserEmail = await redis.get('latest_user');
+      if (latestUserEmail) {
+        const userData = await redis.get(`user:${latestUserEmail}`);
+        if (userData) {
+          const user = JSON.parse(userData);
+          userTokens = user.google_tokens;
+          console.log('Loaded tokens from Redis for:', user.email);
         }
-      );
-    });
-    
-    if (user) {
-      userTokens = JSON.parse(user.google_tokens);
-      console.log('Loaded tokens from database for calendar creation for:', user.email);
+      }
+    } catch (error) {
+      console.error('Error loading user tokens from Redis:', error);
     }
-  } catch (error) {
-    console.error('Error loading user tokens from database:', error);
   }
   
-  // Fallback to session if database doesn't have tokens
+  // Fallback to session if Redis doesn't have tokens
   if (!userTokens && req.session.user?.tokens) {
     userTokens = req.session.user.tokens;
     console.log('Using tokens from session');
@@ -581,49 +549,50 @@ app.post('/api/reservations', async (req, res) => {
     console.log('No authenticated user or tokens available - skipping calendar creation');
   }
   
-  db.run(
-    `INSERT INTO reservations (id, name, email, date, startTime, endTime, duration, purpose, googleEventId) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, name, email, date, startTime, endTime, duration, purpose, googleEventId],
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      
-      const reservation = {
-        id,
-        name,
-        email,
-        date,
-        startTime,
-        endTime,
-        duration,
-        purpose,
-        googleEventId,
-        googleCalendarAdded: !!googleEventId
-      };
-      
-      // Broadcast to all connected clients
-      broadcast({
-        type: 'reservation_created',
-        data: reservation
-      });
-      
-      res.json(reservation);
-    }
-  );
+  const reservation = {
+    id,
+    name,
+    email,
+    date,
+    startTime,
+    endTime,
+    duration,
+    purpose,
+    googleEventId,
+    created_at: new Date().toISOString()
+  };
+  
+  // Save to Redis if available
+  if (redis) {
+    await redis.set(`reservation:${id}`, JSON.stringify(reservation));
+    console.log('Reservation saved to Redis:', id);
+  }
+  
+  // Broadcast to all connected clients
+  broadcast({
+    type: 'reservation_created',
+    data: reservation
+  });
+  
+  res.json({
+    ...reservation,
+    googleCalendarAdded: !!googleEventId
+  });
 });
 
 // Delete reservation
 app.delete('/api/reservations/:id', async (req, res) => {
   const { id } = req.params;
   
-  // Get reservation to check for Google Event ID
-  db.get('SELECT * FROM reservations WHERE id = ?', [id], async (err, reservation) => {
-    if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+  try {
+    let reservation = null;
+    
+    // Get reservation from Redis
+    if (redis) {
+      const data = await redis.get(`reservation:${id}`);
+      if (data) {
+        reservation = JSON.parse(data);
+      }
     }
     
     if (!reservation) {
@@ -633,33 +602,32 @@ app.delete('/api/reservations/:id', async (req, res) => {
     
     // Try to delete from Google Calendar if event exists
     if (reservation.googleEventId) {
-      let userTokens = req.session.user?.tokens;
+      let userTokens = null;
       
-      if (!userTokens) {
-        // Try to load from database
+      if (redis) {
         try {
-          const user = await new Promise((resolve, reject) => {
-            db.get(
-              'SELECT google_tokens FROM users ORDER BY created_at DESC LIMIT 1',
-              (err, row) => {
-                if (err) reject(err);
-                else resolve(row);
-              }
-            );
-          });
-          
-          if (user) {
-            userTokens = JSON.parse(user.google_tokens);
+          const latestUserEmail = await redis.get('latest_user');
+          if (latestUserEmail) {
+            const userData = await redis.get(`user:${latestUserEmail}`);
+            if (userData) {
+              const user = JSON.parse(userData);
+              userTokens = user.google_tokens;
+            }
           }
         } catch (error) {
-          console.error('Error loading user tokens from database:', error);
+          console.error('Error loading user tokens from Redis:', error);
         }
+      }
+      
+      if (!userTokens && req.session.user?.tokens) {
+        userTokens = req.session.user.tokens;
       }
       
       if (userTokens) {
         try {
           oauth2Client.setCredentials(userTokens);
           await deleteGoogleCalendarEvent(oauth2Client, reservation.googleEventId);
+          console.log('Google Calendar event deleted:', reservation.googleEventId);
         } catch (error) {
           console.error('Failed to delete Google Calendar event:', error);
           // Continue with local deletion even if Google Calendar fails
@@ -667,22 +635,23 @@ app.delete('/api/reservations/:id', async (req, res) => {
       }
     }
     
-    // Delete from database
-    db.run('DELETE FROM reservations WHERE id = ?', [id], function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
-      }
-      
-      // Broadcast deletion
-      broadcast({
-        type: 'reservation_deleted',
-        data: { id }
-      });
-      
-      res.json({ success: true });
+    // Delete from Redis
+    if (redis) {
+      await redis.del(`reservation:${id}`);
+      console.log('Reservation deleted from Redis:', id);
+    }
+    
+    // Broadcast deletion
+    broadcast({
+      type: 'reservation_deleted',
+      data: { id }
     });
-  });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting reservation:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Update reservation
@@ -690,54 +659,65 @@ app.put('/api/reservations/:id', async (req, res) => {
   const { id } = req.params;
   const { name, email, date, startTime, endTime, purpose } = req.body;
   
-  // Calculate duration
-  const start = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
-  const end = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
-  const duration = end.diff(start, 'minutes');
-  
-  db.run(
-    `UPDATE reservations 
-     SET name = ?, email = ?, date = ?, startTime = ?, endTime = ?, duration = ?, purpose = ?
-     WHERE id = ?`,
-    [name, email, date, startTime, endTime, duration, purpose, id],
-    function(err) {
-      if (err) {
-        res.status(500).json({ error: err.message });
-        return;
+  try {
+    // Calculate duration
+    const start = moment(`${date} ${startTime}`, 'YYYY-MM-DD HH:mm');
+    const end = moment(`${date} ${endTime}`, 'YYYY-MM-DD HH:mm');
+    const duration = end.diff(start, 'minutes');
+    
+    let existingReservation = null;
+    
+    // Get existing reservation from Redis
+    if (redis) {
+      const data = await redis.get(`reservation:${id}`);
+      if (data) {
+        existingReservation = JSON.parse(data);
       }
-      
-      if (this.changes === 0) {
-        res.status(404).json({ error: 'Reservation not found' });
-        return;
-      }
-      
-      const reservation = {
-        id,
-        name,
-        email,
-        date,
-        startTime,
-        endTime,
-        duration,
-        purpose
-      };
-      
-      // Broadcast update
-      broadcast({
-        type: 'reservation_updated',
-        data: reservation
-      });
-      
-      res.json(reservation);
     }
-  );
+    
+    if (!existingReservation) {
+      res.status(404).json({ error: 'Reservation not found' });
+      return;
+    }
+    
+    const updatedReservation = {
+      ...existingReservation,
+      name,
+      email,
+      date,
+      startTime,
+      endTime,
+      duration,
+      purpose,
+      updated_at: new Date().toISOString()
+    };
+    
+    // Save to Redis
+    if (redis) {
+      await redis.set(`reservation:${id}`, JSON.stringify(updatedReservation));
+      console.log('Reservation updated in Redis:', id);
+    }
+    
+    // Broadcast update
+    broadcast({
+      type: 'reservation_updated',
+      data: updatedReservation
+    });
+    
+    res.json(updatedReservation);
+  } catch (error) {
+    console.error('Error updating reservation:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Only start the server if not in Vercel environment
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`WebSocket server running on ws://localhost:${config.server.wsPort}`);
+    if (wss) {
+      console.log(`WebSocket server running on ws://localhost:${config.server.wsPort}`);
+    }
     console.log('\nTo use Google Calendar integration:');
     console.log('1. Set up Google Cloud Console project');
     console.log('2. Enable Calendar API');
