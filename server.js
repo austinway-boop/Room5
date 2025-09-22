@@ -14,7 +14,10 @@ const app = express();
 const PORT = config.server.port;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(express.json());
 
 // Serve static files
@@ -33,12 +36,109 @@ if (!process.env.VERCEL) {
   });
 }
 
+// Database setup (use /tmp in Vercel for temporary storage)
+const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
+const db = new sqlite3.Database(dbPath);
+
+// Create tables
+db.serialize(() => {
+  // Create reservations table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reservations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      date TEXT NOT NULL,
+      startTime TEXT NOT NULL,
+      endTime TEXT NOT NULL,
+      duration INTEGER NOT NULL,
+      purpose TEXT,
+      googleEventId TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Create users table for storing Google tokens
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT,
+      google_tokens TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Create sessions table for Vercel persistence
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      sid TEXT PRIMARY KEY,
+      sess TEXT NOT NULL,
+      expire INTEGER NOT NULL
+    )
+  `);
+});
+
+// Custom SQLite session store for Vercel
+class SQLiteStore {
+  constructor(db) {
+    this.db = db;
+  }
+
+  get(sid, callback) {
+    this.db.get('SELECT sess FROM sessions WHERE sid = ? AND expire > ?', 
+      [sid, Date.now()], 
+      (err, row) => {
+        if (err) return callback(err);
+        if (!row) return callback();
+        try {
+          callback(null, JSON.parse(row.sess));
+        } catch (e) {
+          callback(e);
+        }
+      }
+    );
+  }
+
+  set(sid, sess, callback) {
+    const expire = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
+    const sessJson = JSON.stringify(sess);
+    this.db.run(
+      'INSERT OR REPLACE INTO sessions (sid, sess, expire) VALUES (?, ?, ?)',
+      [sid, sessJson, expire],
+      callback
+    );
+  }
+
+  destroy(sid, callback) {
+    this.db.run('DELETE FROM sessions WHERE sid = ?', [sid], callback);
+  }
+
+  touch(sid, sess, callback) {
+    const expire = Date.now() + (24 * 60 * 60 * 1000);
+    this.db.run(
+      'UPDATE sessions SET expire = ? WHERE sid = ?',
+      [expire, sid],
+      callback
+    );
+  }
+}
+
+// Session configuration with SQLite store
+const sessionStore = new SQLiteStore(db);
+
 app.use(session({
+  store: {
+    get: (sid, cb) => sessionStore.get(sid, cb),
+    set: (sid, sess, cb) => sessionStore.set(sid, sess, cb),
+    destroy: (sid, cb) => sessionStore.destroy(sid, cb),
+    touch: (sid, sess, cb) => sessionStore.touch(sid, sess, cb)
+  },
   secret: config.session.secret,
   resave: false,
   saveUninitialized: false,
   cookie: { 
-    secure: process.env.VERCEL ? true : false, // Use secure cookies in production
+    secure: process.env.VERCEL ? true : false,
     httpOnly: true,
     sameSite: 'lax',
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
@@ -66,40 +166,12 @@ app.get('/debug/config', (req, res) => {
     redirectUri: config.google.redirectUri,
     vercelUrl: process.env.VERCEL_URL,
     clientId: config.google.clientId,
+    sessionId: req.sessionID,
+    hasSession: !!req.session,
+    sessionUser: req.session?.user?.email || 'none',
     message: 'Add this EXACT redirect URI to Google Cloud Console'
   });
 });
-
-// Database setup (use /tmp in Vercel for temporary storage)
-const dbPath = process.env.VERCEL ? '/tmp/reservations.db' : './reservations.db';
-const db = new sqlite3.Database(dbPath);
-
-// Create reservations table
-db.run(`
-  CREATE TABLE IF NOT EXISTS reservations (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    date TEXT NOT NULL,
-    startTime TEXT NOT NULL,
-    endTime TEXT NOT NULL,
-    duration INTEGER NOT NULL,
-    purpose TEXT,
-    googleEventId TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-// Create users table for storing Google tokens
-db.run(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT,
-    google_tokens TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
 
 // WebSocket server for real-time updates (only in local development)
 let wss = null;
@@ -252,59 +324,126 @@ app.get('/auth/google/callback', async (req, res) => {
     const userInfo = await oauth2.userinfo.get();
     console.log('User info retrieved:', userInfo.data.email);
     
-    // Store user and tokens in database
+    // Store user and tokens in database (persistent storage)
     const userId = uuidv4();
-    db.run(
-      `INSERT OR REPLACE INTO users (id, email, name, google_tokens) VALUES (?, ?, ?, ?)`,
-      [userId, userInfo.data.email, userInfo.data.name, JSON.stringify(tokens)],
-      (err) => {
-        if (err) {
-          console.error('Error saving user to database:', err);
-          res.redirect('/?error=auth_failed');
-          return;
-        }
-        
-        // Store in session
-        req.session.user = {
-          id: userId,
-          email: userInfo.data.email,
-          name: userInfo.data.name,
-          tokens: tokens
-        };
-        
-        // Force session save before redirect
-        req.session.save((saveErr) => {
-          if (saveErr) {
-            console.error('Session save error:', saveErr);
+    
+    // Save to database for persistence
+    await new Promise((resolve, reject) => {
+      db.run(
+        `INSERT OR REPLACE INTO users (id, email, name, google_tokens) VALUES (
+          COALESCE((SELECT id FROM users WHERE email = ?), ?),
+          ?, ?, ?
+        )`,
+        [userInfo.data.email, userId, userInfo.data.email, userInfo.data.name, JSON.stringify(tokens)],
+        (err) => {
+          if (err) {
+            console.error('Error saving user to database:', err);
+            reject(err);
           } else {
-            console.log('Session saved successfully for:', userInfo.data.email);
+            console.log('User saved to database successfully');
+            resolve();
           }
-          res.redirect('/?auth=success');
-        });
+        }
+      );
+    });
+    
+    // Store in session
+    req.session.user = {
+      id: userId,
+      email: userInfo.data.email,
+      name: userInfo.data.name,
+      tokens: tokens
+    };
+    
+    // Force session save before redirect
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        console.error('Session save error:', saveErr);
+      } else {
+        console.log('Session saved successfully for:', userInfo.data.email);
       }
-    );
+      res.redirect('/?auth=success');
+    });
   } catch (error) {
     console.error('Auth error:', error);
     res.redirect('/?error=auth_failed');
   }
 });
 
-app.get('/auth/status', (req, res) => {
+app.get('/auth/status', async (req, res) => {
   console.log('Auth status check - Session ID:', req.sessionID);
   console.log('Auth status check - User in session:', req.session.user ? req.session.user.email : 'none');
   
+  // Try to load from session first
+  if (req.session.user) {
+    res.json({
+      authenticated: true,
+      user: {
+        email: req.session.user.email,
+        name: req.session.user.name
+      }
+    });
+    return;
+  }
+  
+  // If no session but we have a session ID, try to load from database
+  if (req.sessionID) {
+    try {
+      const user = await new Promise((resolve, reject) => {
+        db.get(
+          'SELECT * FROM users ORDER BY created_at DESC LIMIT 1',
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          }
+        );
+      });
+      
+      if (user) {
+        // Restore session from database
+        req.session.user = {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          tokens: JSON.parse(user.google_tokens)
+        };
+        
+        req.session.save((err) => {
+          if (err) console.error('Session restore error:', err);
+          res.json({
+            authenticated: true,
+            user: {
+              email: user.email,
+              name: user.name
+            }
+          });
+        });
+        return;
+      }
+    } catch (error) {
+      console.error('Error loading user from database:', error);
+    }
+  }
+  
   res.json({
-    authenticated: !!req.session.user,
-    user: req.session.user ? {
-      email: req.session.user.email,
-      name: req.session.user.name
-    } : null
+    authenticated: false,
+    user: null
   });
 });
 
 app.post('/auth/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ success: true });
+  const email = req.session.user?.email;
+  if (email) {
+    // Clear from database
+    db.run('DELETE FROM users WHERE email = ?', [email], (err) => {
+      if (err) console.error('Error clearing user from database:', err);
+    });
+  }
+  
+  req.session.destroy((err) => {
+    if (err) console.error('Session destroy error:', err);
+    res.json({ success: true });
+  });
 });
 
 // Get all reservations
@@ -381,10 +520,35 @@ app.post('/api/reservations', async (req, res) => {
   console.log('Creating reservation - Session user:', req.session.user ? req.session.user.email : 'none');
   console.log('Session has tokens:', req.session.user && req.session.user.tokens ? 'yes' : 'no');
   
-  if (req.session.user && req.session.user.tokens) {
+  // Check session first, then database
+  let userTokens = req.session.user?.tokens;
+  
+  if (!userTokens) {
+    // Try to load from database
+    try {
+      const user = await new Promise((resolve, reject) => {
+        db.get(
+          'SELECT google_tokens FROM users ORDER BY created_at DESC LIMIT 1',
+          (err, row) => {
+            if (err) reject(err);
+            else resolve(row);
+          }
+        );
+      });
+      
+      if (user) {
+        userTokens = JSON.parse(user.google_tokens);
+        console.log('Loaded tokens from database for calendar creation');
+      }
+    } catch (error) {
+      console.error('Error loading user tokens from database:', error);
+    }
+  }
+  
+  if (userTokens) {
     try {
       console.log('Setting OAuth credentials for calendar event creation');
-      oauth2Client.setCredentials(req.session.user.tokens);
+      oauth2Client.setCredentials(userTokens);
       const googleEvent = await createGoogleCalendarEvent(oauth2Client, {
         name,
         email,
@@ -401,7 +565,7 @@ app.post('/api/reservations', async (req, res) => {
       // Continue without Google Calendar integration
     }
   } else {
-    console.log('No authenticated user or tokens in session - skipping calendar creation');
+    console.log('No authenticated user or tokens available - skipping calendar creation');
   }
   
   db.run(
@@ -455,13 +619,38 @@ app.delete('/api/reservations/:id', async (req, res) => {
     }
     
     // Try to delete from Google Calendar if event exists
-    if (reservation.googleEventId && req.session.user && req.session.user.tokens) {
-      try {
-        oauth2Client.setCredentials(req.session.user.tokens);
-        await deleteGoogleCalendarEvent(oauth2Client, reservation.googleEventId);
-      } catch (error) {
-        console.error('Failed to delete Google Calendar event:', error);
-        // Continue with local deletion even if Google Calendar fails
+    if (reservation.googleEventId) {
+      let userTokens = req.session.user?.tokens;
+      
+      if (!userTokens) {
+        // Try to load from database
+        try {
+          const user = await new Promise((resolve, reject) => {
+            db.get(
+              'SELECT google_tokens FROM users ORDER BY created_at DESC LIMIT 1',
+              (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+              }
+            );
+          });
+          
+          if (user) {
+            userTokens = JSON.parse(user.google_tokens);
+          }
+        } catch (error) {
+          console.error('Error loading user tokens from database:', error);
+        }
+      }
+      
+      if (userTokens) {
+        try {
+          oauth2Client.setCredentials(userTokens);
+          await deleteGoogleCalendarEvent(oauth2Client, reservation.googleEventId);
+        } catch (error) {
+          console.error('Failed to delete Google Calendar event:', error);
+          // Continue with local deletion even if Google Calendar fails
+        }
       }
     }
     

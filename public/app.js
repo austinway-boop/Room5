@@ -15,8 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('auth') === 'success') {
         console.log('Auth successful, checking status...');
+        // Show success message
+        showSuccessModal('Google Calendar connected successfully!');
         // Remove auth parameter from URL
         window.history.replaceState({}, document.title, window.location.pathname);
+        // Force auth status check after a short delay to ensure session is saved
+        setTimeout(() => {
+            checkAuthStatus();
+        }, 500);
     }
     if (urlParams.get('error') === 'auth_failed') {
         alert('Failed to connect Google Calendar. Please try again.');
@@ -68,7 +74,10 @@ async function handleGoogleAuth() {
         // Logout
         if (confirm('Disconnect Google Calendar?')) {
             try {
-                await fetch('/auth/logout', { method: 'POST' });
+                await fetch('/auth/logout', { 
+                    method: 'POST',
+                    credentials: 'include'
+                });
                 isGoogleAuthenticated = false;
                 currentUser = null;
                 updateAuthButton();
@@ -331,7 +340,9 @@ function getReservationForTimeSlot(slotStart, slotEnd) {
 // Load Reservations
 async function loadReservations() {
     try {
-        const response = await fetch(`${API_URL}/reservations?date=${formatDate(selectedDate)}`);
+        const response = await fetch(`${API_URL}/reservations?date=${formatDate(selectedDate)}`, {
+            credentials: 'include'
+        });
         if (!response.ok) {
             throw new Error('Failed to load reservations');
         }
@@ -384,7 +395,8 @@ async function deleteReservation(id) {
     
     try {
         const response = await fetch(`${API_URL}/reservations/${id}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
         });
         
         if (!response.ok) {
@@ -488,23 +500,35 @@ function showSuccessModal(reservation) {
     const modal = document.getElementById('successModal');
     const details = document.getElementById('successDetails');
     
-    details.innerHTML = `
-        <div>
-            <strong>Date:</strong> ${reservation.date}<br>
-            <strong>Time:</strong> ${reservation.startTime} - ${reservation.endTime}<br>
-            <strong>Duration:</strong> ${reservation.duration} minutes<br>
-            ${reservation.purpose ? `<strong>Purpose:</strong> ${reservation.purpose}<br>` : ''}
-            ${reservation.googleCalendarAdded ? 
-                `<br><div style="padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem; color: #14532d; font-weight: 600;">
-                    ✅ Event added to Google Calendar!
-                </div>` : 
-                isGoogleAuthenticated ? '' : 
-                `<br><div style="padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem; color: #92400e;">
-                    💡 Connect Google Calendar to automatically add events
-                </div>`
-            }
-        </div>
-    `;
+    // Handle both string messages and reservation objects
+    if (typeof reservation === 'string') {
+        details.innerHTML = `
+            <div style="padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem; color: #14532d; font-weight: 600;">
+                ✅ ${reservation}
+            </div>
+        `;
+    } else {
+        details.innerHTML = `
+            <div>
+                <strong>Date:</strong> ${reservation.date}<br>
+                <strong>Time:</strong> ${reservation.startTime} - ${reservation.endTime}<br>
+                <strong>Duration:</strong> ${reservation.duration} minutes<br>
+                ${reservation.purpose ? `<strong>Purpose:</strong> ${reservation.purpose}<br>` : ''}
+                ${reservation.googleCalendarAdded ? 
+                    `<br><div style="padding: 0.75rem; background: #d1fae5; border-radius: 0.5rem; color: #14532d; font-weight: 600;">
+                        ✅ Event added to Google Calendar!
+                    </div>` : 
+                    isGoogleAuthenticated ? 
+                    `<br><div style="padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem; color: #92400e;">
+                        ⚠️ Calendar event not added (try reconnecting Google Calendar)
+                    </div>` :
+                    `<br><div style="padding: 0.75rem; background: #fef3c7; border-radius: 0.5rem; color: #92400e;">
+                        💡 Connect Google Calendar to automatically add events
+                    </div>`
+                }
+            </div>
+        `;
+    }
     
     modal.classList.add('show');
 }
