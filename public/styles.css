@@ -182,45 +182,46 @@ body {
 
 /* Info Cards */
 .booking-info {
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
 }
 
 .info-card {
     display: flex;
-    gap: 1rem;
-    padding: 1rem;
+    gap: 0.75rem;
+    padding: 0.625rem;
     background: var(--calendly-green-lightest);
-    border-radius: var(--radius-md);
-    margin-bottom: 1rem;
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.5rem;
 }
 
 .info-icon {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--calendly-green-lighter);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     flex-shrink: 0;
 }
 
 .info-icon svg {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     stroke: var(--calendly-green);
 }
 
 .info-content h3 {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.125rem;
 }
 
 .info-content p {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    line-height: 1.3;
 }
 
 /* Booking Form */
@@ -342,6 +343,13 @@ textarea {
     text-transform: uppercase;
 }
 
+/* Weekend headers */
+.calendar-day-header:first-child,
+.calendar-day-header:last-child {
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
 .calendar-day {
     aspect-ratio: 1;
     display: flex;
@@ -375,6 +383,12 @@ textarea {
     color: var(--text-muted);
     cursor: not-allowed;
     background: var(--bg-secondary);
+    position: relative;
+}
+
+.calendar-day.disabled:hover {
+    background: var(--bg-secondary);
+    border-color: transparent;
 }
 
 .calendar-day.other-month {
@@ -402,6 +416,8 @@ textarea {
     display: flex;
     justify-content: center;
     gap: 1rem;
+    margin-top: auto;
+    padding-top: 1rem;
 }
 
 .calendar-nav-btn {
@@ -607,7 +623,7 @@ textarea {
 /* Reservation Cards */
 .reservations-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 1rem;
 }
 
@@ -617,6 +633,8 @@ textarea {
     border: 1px solid var(--border-light);
     border-radius: var(--radius-md);
     transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
 }
 
 .reservation-card:hover {
@@ -627,8 +645,10 @@ textarea {
 .reservation-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .reservation-time {
@@ -642,6 +662,11 @@ textarea {
     color: var(--text-muted);
 }
 
+.reservation-body {
+    flex: 1;
+    margin-bottom: 1rem;
+}
+
 .reservation-name {
     font-weight: 600;
     color: var(--text-primary);
@@ -651,7 +676,8 @@ textarea {
 .reservation-purpose {
     font-size: 0.875rem;
     color: var(--text-secondary);
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+    word-wrap: break-word;
 }
 
 .google-calendar-badge {
@@ -664,7 +690,13 @@ textarea {
     border-radius: 100px;
     font-size: 0.75rem;
     font-weight: 500;
-    margin-bottom: 1rem;
+}
+
+.reservation-actions {
+    margin-top: auto;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .btn-delete {

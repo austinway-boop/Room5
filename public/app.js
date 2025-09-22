@@ -273,13 +273,21 @@ function createCalendarDay(day, monthOffset) {
     today.setHours(0, 0, 0, 0);
     date.setHours(0, 0, 0, 0);
     
+    // Get day of week (0 = Sunday, 6 = Saturday)
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    
     // Add classes based on date
     if (monthOffset !== 0) {
         dayEl.classList.add('other-month');
     }
     
-    if (date < today) {
+    // Disable past dates and weekends
+    if (date < today || isWeekend) {
         dayEl.classList.add('disabled');
+        if (isWeekend && date >= today) {
+            dayEl.title = dayOfWeek === 0 ? 'Closed on Sundays' : 'Closed on Saturdays';
+        }
     } else {
         if (date.getTime() === today.getTime()) {
             dayEl.classList.add('today');
@@ -294,7 +302,7 @@ function createCalendarDay(day, monthOffset) {
             dayEl.classList.add('has-reservations');
         }
         
-        // Add click handler
+        // Add click handler only for weekdays
         dayEl.addEventListener('click', () => selectDate(date));
     }
     
@@ -341,13 +349,29 @@ function generateTimeSlots() {
         return;
     }
     
+    // Check if selected date is a weekend
+    const dayOfWeek = selectedDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        container.innerHTML = `
+            <div class="no-date-selected">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon">
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                    <line x1="12" y1="2" x2="12" y2="12"></line>
+                </svg>
+                <p>The Film Room is closed on weekends</p>
+                <p class="text-muted" style="font-size: 0.875rem; margin-top: 0.5rem;">Available Monday-Friday, Noon-8:00 PM</p>
+            </div>
+        `;
+        return;
+    }
+    
     container.innerHTML = '';
     
-    // Generate 30-minute slots from 8 AM to 10 PM
-    for (let hour = 8; hour <= 21; hour++) {
+    // Generate 30-minute slots from Noon (12 PM) to 8 PM for weekdays only
+    for (let hour = 12; hour <= 19; hour++) {
         for (let minutes = 0; minutes < 60; minutes += 30) {
-            // Don't create 10:00 PM slot (last slot should be 9:30 PM)
-            if (hour === 21 && minutes === 30) break;
+            // Last slot should be 7:30 PM (ending at 8:00 PM)
+            if (hour === 19 && minutes === 30) break;
             
             const startTime = `${String(hour).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
             const endTime = minutes === 30 ? 
