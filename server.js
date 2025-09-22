@@ -9,7 +9,6 @@ const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
 const { Redis } = require('@upstash/redis');
-const RedisStore = require('connect-redis').default;
 
 const app = express();
 const PORT = config.server.port;
@@ -54,7 +53,52 @@ if (!process.env.VERCEL) {
   });
 }
 
-// Session configuration with Redis store (if available)
+// Custom Upstash Redis session store
+class UpstashSessionStore extends session.Store {
+  constructor(client) {
+    super();
+    this.client = client;
+    this.prefix = 'sess:';
+  }
+
+  async get(sid, callback) {
+    try {
+      const key = this.prefix + sid;
+      const data = await this.client.get(key);
+      callback(null, data ? JSON.parse(data) : null);
+    } catch (err) {
+      callback(err);
+    }
+  }
+
+  async set(sid, sess, callback) {
+    try {
+      const key = this.prefix + sid;
+      const ttl = 86400; // 24 hours in seconds
+      await this.client.set(key, JSON.stringify(sess), { ex: ttl });
+      callback && callback();
+    } catch (err) {
+      callback && callback(err);
+    }
+  }
+
+  async destroy(sid, callback) {
+    try {
+      const key = this.prefix + sid;
+      await this.client.del(key);
+      callback && callback();
+    } catch (err) {
+      callback && callback(err);
+    }
+  }
+
+  async touch(sid, sess, callback) {
+    // Update session expiry
+    this.set(sid, sess, callback);
+  }
+}
+
+// Session configuration
 let sessionConfig = {
   secret: config.session.secret,
   resave: false,
@@ -69,22 +113,8 @@ let sessionConfig = {
 
 // Use Redis for session storage if available
 if (redis) {
-  sessionConfig.store = new RedisStore({
-    client: {
-      get: async (key) => {
-        const val = await redis.get(key);
-        return val ? JSON.parse(val) : null;
-      },
-      set: async (key, val) => {
-        await redis.set(key, JSON.stringify(val), { ex: 86400 }); // 24 hours
-      },
-      del: async (key) => {
-        await redis.del(key);
-      }
-    },
-    prefix: 'sess:'
-  });
-  console.log('Using Redis for session storage');
+  sessionConfig.store = new UpstashSessionStore(redis);
+  console.log('Using Upstash Redis for session storage');
 } else {
   console.log('Using memory for session storage (sessions will not persist)');
 }
