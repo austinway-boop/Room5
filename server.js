@@ -16,53 +16,94 @@ const PORT = config.server.port;
 // Initialize Upstash Redis client
 let redis = null;
 
-// Debug environment variables (remove in production)
-console.log('Redis Config Debug:');
-console.log('- restApiUrl:', config.redis.restApiUrl ? 'Set' : 'Not set');
-console.log('- restApiToken:', config.redis.restApiToken ? 'Set (length: ' + config.redis.restApiToken.length + ')' : 'Not set');
+// Debug environment variables (only in development)
+if (!process.env.VERCEL || process.env.NODE_ENV === 'development') {
+  console.log('Redis Config Debug:');
+  console.log('- restApiUrl:', config.redis.restApiUrl ? 'Set' : 'Not set');
+  console.log('- restApiToken:', config.redis.restApiToken ? `Set (length: ${config.redis.restApiToken.length})` : 'Not set');
 
-// Check for all possible Redis env var names
-const possibleEnvVars = [
-  'dataforroom5_KV_REST_API_URL',
-  'dataforroom5_KV_REST_API_TOKEN',
-  'KV_REST_API_URL',
-  'KV_REST_API_TOKEN',
-  'UPSTASH_REDIS_REST_URL',
-  'UPSTASH_REDIS_REST_TOKEN'
-];
+  // Check for all possible Redis env var names
+  const possibleEnvVars = [
+    'dataforroom5_KV_REST_API_URL',
+    'dataforroom5_KV_REST_API_TOKEN',
+    'KV_REST_API_URL',
+    'KV_REST_API_TOKEN',
+    'UPSTASH_REDIS_REST_URL',
+    'UPSTASH_REDIS_REST_TOKEN'
+  ];
 
-console.log('Environment variables check:');
-possibleEnvVars.forEach(varName => {
-  console.log(`- ${varName}:`, process.env[varName] ? 'Present' : 'Missing');
-});
-
-try {
-  // Try different approaches based on what's available
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    redis = new Redis({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN
-    });
-    console.log('Connected to Upstash Redis using KV_REST_API vars');
-  } else if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-    redis = new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN
-    });
-    console.log('Connected to Upstash Redis using UPSTASH_REDIS_REST vars');
-  } else if (config.redis.restApiUrl && config.redis.restApiToken) {
-    redis = new Redis({
-      url: config.redis.restApiUrl,
-      token: config.redis.restApiToken
-    });
-    console.log('Connected to Upstash Redis using config vars');
-  } else {
-    console.log('Redis credentials not found, using memory storage (development only)');
-  }
-} catch (error) {
-  console.error('Failed to connect to Redis:', error);
-  console.log('Falling back to memory storage');
+  console.log('Environment variables check:');
+  possibleEnvVars.forEach(varName => {
+    console.log(`- ${varName}:`, process.env[varName] ? 'Present' : 'Missing');
+  });
 }
+
+async function initializeRedis() {
+  try {
+    let testRedis = null;
+    
+    // Try different approaches based on what's available
+    if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+      testRedis = new Redis({
+        url: process.env.KV_REST_API_URL,
+        token: process.env.KV_REST_API_TOKEN
+      });
+      console.log('Trying Upstash Redis with KV_REST_API vars');
+    } else if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+      testRedis = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN
+      });
+      console.log('Trying Upstash Redis with UPSTASH_REDIS_REST vars');
+    } else if (config.redis.restApiUrl && config.redis.restApiToken) {
+      testRedis = new Redis({
+        url: config.redis.restApiUrl,
+        token: config.redis.restApiToken
+      });
+      console.log('Trying Upstash Redis with config vars');
+    } else {
+      console.log('⚠️ Redis credentials not configured - using in-memory storage');
+      console.log('  To enable Redis persistence, add UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN to Vercel environment variables');
+      return null;
+    }
+    
+    // Test the connection with proper error handling
+    try {
+      await testRedis.set('test:connection', 'ok', { ex: 10 });
+      const testVal = await testRedis.get('test:connection');
+      if (testVal === 'ok') {
+        console.log('✅ Redis connection successful!');
+        return testRedis;
+      } else {
+        console.log('⚠️ Redis test failed - using in-memory storage');
+        return null;
+      }
+    } catch (connError) {
+      // Check if it's an auth error
+      if (connError.message && connError.message.includes('WRONGPASS')) {
+        console.error('❌ Redis authentication failed - check your Upstash credentials in Vercel environment variables');
+        console.error('   Make sure UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are correctly set');
+      } else {
+        console.error('⚠️ Redis connection error:', connError.message);
+      }
+      console.log('Falling back to in-memory storage');
+      return null;
+    }
+  } catch (error) {
+    console.error('Redis initialization error:', error.message);
+    console.log('Falling back to in-memory storage');
+    return null;
+  }
+}
+
+// Initialize Redis
+initializeRedis().then(r => {
+  redis = r;
+  console.log('Redis initialization complete:', redis ? 'Connected' : 'Using memory');
+}).catch(err => {
+  console.error('Redis init error:', err);
+  redis = null;
+});
 
 // Middleware
 app.use(cors({
@@ -96,42 +137,76 @@ if (!process.env.VERCEL) {
   });
 }
 
-// Custom Upstash Redis session store
+// In-memory session store fallback
+const memorySessions = new Map();
+
+// Custom Upstash Redis session store with fallback
 class UpstashSessionStore extends session.Store {
   constructor(client) {
     super();
     this.client = client;
     this.prefix = 'sess:';
+    this.useMemory = false;
   }
 
   async get(sid, callback) {
+    if (this.useMemory || !this.client) {
+      const data = memorySessions.get(this.prefix + sid);
+      callback(null, data || null);
+      return;
+    }
+
     try {
       const key = this.prefix + sid;
       const data = await this.client.get(key);
       callback(null, data ? JSON.parse(data) : null);
     } catch (err) {
-      callback(err);
+      // Only log errors once to avoid spam
+      if (!this.useMemory) {
+        console.log('Redis session get error, switching to memory:', err.message);
+        this.useMemory = true;
+      }
+      const data = memorySessions.get(this.prefix + sid);
+      callback(null, data || null);
     }
   }
 
   async set(sid, sess, callback) {
+    if (this.useMemory) {
+      memorySessions.set(this.prefix + sid, sess);
+      callback && callback();
+      return;
+    }
+
     try {
       const key = this.prefix + sid;
       const ttl = 86400; // 24 hours in seconds
       await this.client.set(key, JSON.stringify(sess), { ex: ttl });
       callback && callback();
     } catch (err) {
-      callback && callback(err);
+      console.log('Redis session set error, switching to memory:', err.message);
+      this.useMemory = true;
+      memorySessions.set(this.prefix + sid, sess);
+      callback && callback();
     }
   }
 
   async destroy(sid, callback) {
+    if (this.useMemory) {
+      memorySessions.delete(this.prefix + sid);
+      callback && callback();
+      return;
+    }
+
     try {
       const key = this.prefix + sid;
       await this.client.del(key);
       callback && callback();
     } catch (err) {
-      callback && callback(err);
+      console.log('Redis session destroy error, switching to memory:', err.message);
+      this.useMemory = true;
+      memorySessions.delete(this.prefix + sid);
+      callback && callback();
     }
   }
 
@@ -141,7 +216,7 @@ class UpstashSessionStore extends session.Store {
   }
 }
 
-// Session configuration
+// Session configuration - start with memory, upgrade to Redis if available
 let sessionConfig = {
   secret: config.session.secret,
   resave: false,
@@ -154,15 +229,9 @@ let sessionConfig = {
   }
 };
 
-// Use Redis for session storage if available
-if (redis) {
-  sessionConfig.store = new UpstashSessionStore(redis);
-  console.log('Using Upstash Redis for session storage');
-} else {
-  console.log('Using memory for session storage (sessions will not persist)');
-}
-
+// Start with a basic memory store
 app.use(session(sessionConfig));
+console.log('Sessions initialized with memory store');
 
 // Google OAuth2 Configuration
 const oauth2Client = new google.auth.OAuth2(
