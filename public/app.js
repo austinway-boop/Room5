@@ -445,8 +445,21 @@ function checkSlotAvailability(startTime, endTime) {
         const resStart = reservation.startTime;
         const resEnd = reservation.endTime;
         
+        // Convert times to comparable numbers (minutes since midnight)
+        const toMinutes = (timeStr) => {
+            const [hours, minutes] = timeStr.split(':').map(Number);
+            return hours * 60 + minutes;
+        };
+        
+        const slotStartMin = toMinutes(startTime);
+        const slotEndMin = toMinutes(endTime);
+        const resStartMin = toMinutes(resStart);
+        const resEndMin = toMinutes(resEnd);
+        
         // Check if reservation overlaps with this time slot
-        return (resStart < endTime && resEnd > startTime);
+        // Allow back-to-back bookings (one ends exactly when another starts)
+        return (slotStartMin < resEndMin && slotEndMin > resStartMin) &&
+               !(slotStartMin === resEndMin || slotEndMin === resStartMin);
     });
 }
 
@@ -653,31 +666,26 @@ async function handleReservationSubmit() {
 
 // Load Reservations
 async function loadAllReservations() {
-    // Load all reservations for the current month
+    // Load ALL reservations (not filtered by date) to properly show everything
     try {
-        const firstDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
-        const lastDay = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 0);
+        const response = await fetch(`${API_URL}/reservations`, {
+            credentials: 'include'
+        });
         
-        const allReservations = [];
-        
-        // Load each day's reservations
-        for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
-            const response = await fetch(`${API_URL}/reservations?date=${formatDate(d)}`, {
-                credentials: 'include'
-            });
+        if (response.ok) {
+            const allReservations = await response.json();
+            reservations = allReservations;
+            console.log(`Loaded ${reservations.length} total reservations`);
             
-            if (response.ok) {
-                const dayReservations = await response.json();
-                allReservations.push(...dayReservations.map(r => ({
-                    ...r,
-                    date: formatDate(d)
-                })));
-            }
+            // Update the calendar to show which days have reservations
+            generateCalendar();
+        } else {
+            console.error('Failed to load reservations:', response.status);
+            reservations = [];
         }
-        
-        reservations = allReservations;
     } catch (error) {
         console.error('Error loading all reservations:', error);
+        reservations = [];
     }
 }
 

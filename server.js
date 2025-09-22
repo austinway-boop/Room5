@@ -764,8 +764,13 @@ app.post('/api/check-availability', async (req, res) => {
               
               // Only check for TIME conflicts, not who booked it
               // This allows the same person to book multiple non-overlapping slots
-              if ((reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart))) {
-                conflicts.push(reservation);
+              // Allow back-to-back bookings (one ends exactly when another starts)
+              // Use <= and >= to exclude exact boundary matches
+              if (reqStart.isBefore(resEnd) && reqEnd.isAfter(resStart)) {
+                // Additional check: if one ends exactly when another starts, it's OK
+                if (!(reqStart.isSame(resEnd) || reqEnd.isSame(resStart))) {
+                  conflicts.push(reservation);
+                }
               }
             }
           }
