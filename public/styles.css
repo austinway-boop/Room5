@@ -26,6 +26,26 @@
     --radius-lg: 12px;
 }
 
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-medium);
+    border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--calendly-green-light);
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -43,7 +63,7 @@ body {
 /* Container */
 .calendly-container {
     width: 100%;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
@@ -55,11 +75,15 @@ body {
     border-bottom: 1px solid var(--border-light);
     padding: 1rem 2rem;
     box-shadow: var(--shadow-sm);
+    height: 80px;
+    display: flex;
+    align-items: center;
 }
 
 .header-content {
     max-width: 1440px;
     margin: 0 auto;
+    width: 100%;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -122,12 +146,12 @@ body {
 
 /* Main Content Grid */
 .calendly-main {
-    flex: 1;
     display: grid;
     grid-template-columns: 380px 1fr 320px;
     max-width: 1440px;
     margin: 0 auto;
     width: 100%;
+    height: calc(100vh - 80px); /* Subtract header height */
     overflow: hidden;
 }
 
@@ -137,6 +161,7 @@ body {
     border-right: 1px solid var(--border-light);
     padding: 2rem;
     overflow-y: auto;
+    height: 100%;
 }
 
 .booking-header {
@@ -202,6 +227,7 @@ body {
 .booking-form-section {
     padding-top: 1rem;
     border-top: 1px solid var(--border-light);
+    margin-bottom: 2rem;
 }
 
 .booking-form-section h3 {
@@ -275,6 +301,8 @@ textarea {
     padding: 2rem;
     display: flex;
     flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
 }
 
 .calendar-header {
@@ -301,6 +329,8 @@ textarea {
     grid-template-columns: repeat(7, 1fr);
     gap: 0.5rem;
     margin-bottom: 1.5rem;
+    flex: 1;
+    max-height: 450px;
 }
 
 .calendar-day-header {
@@ -396,6 +426,7 @@ textarea {
     border-left: 1px solid var(--border-light);
     padding: 2rem 1.5rem;
     overflow-y: auto;
+    height: 100%;
 }
 
 .time-header {
@@ -419,6 +450,9 @@ textarea {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    overflow-y: auto;
+    flex: 1;
+    max-height: calc(100vh - 300px);
 }
 
 .no-date-selected {
@@ -529,10 +563,12 @@ textarea {
 /* Reservations Summary */
 .reservations-summary {
     max-width: 1440px;
-    margin: 0 auto;
+    margin: 2rem auto;
     padding: 2rem;
     background: var(--bg-primary);
-    border-top: 1px solid var(--border-light);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
 }
 
 .summary-header {
@@ -782,7 +818,9 @@ textarea {
 @media (max-width: 992px) {
     .calendly-main {
         grid-template-columns: 1fr;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto;
+        height: auto;
+        min-height: calc(100vh - 80px);
     }
     
     .calendly-left-panel,
@@ -790,6 +828,8 @@ textarea {
     .calendly-right-panel {
         border: none;
         border-bottom: 1px solid var(--border-light);
+        height: auto;
+        min-height: 400px;
     }
     
     .calendly-left-panel {
