@@ -220,22 +220,30 @@ class UpstashSessionStore extends session.Store {
   }
 }
 
-// Session configuration - start with memory, upgrade to Redis if available
+// Session configuration with proper persistence
 let sessionConfig = {
   secret: config.session.secret,
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: true, // Save uninitialized sessions to ensure persistence
   cookie: { 
     secure: process.env.VERCEL ? true : false,
     httpOnly: true,
-    sameSite: 'lax',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  }
+    sameSite: process.env.VERCEL ? 'none' : 'lax', // 'none' for cross-site cookies on Vercel
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for better persistence
+    domain: process.env.VERCEL_URL ? `.${process.env.VERCEL_URL.split('.').slice(-2).join('.')}` : undefined
+  },
+  name: 'room5_session' // Custom session name
 };
 
-// Start with a basic memory store
+// Use Redis for session storage if available
+if (redis) {
+  sessionConfig.store = new UpstashSessionStore(redis);
+  console.log('Using Upstash Redis for session storage');
+} else {
+  console.log('Using memory for session storage (sessions will not persist)');
+}
+
 app.use(session(sessionConfig));
-console.log('Sessions initialized with memory store');
 
 // Google OAuth2 Configuration
 const oauth2Client = new google.auth.OAuth2(
@@ -339,14 +347,35 @@ async function createGoogleCalendarEvent(auth, reservation) {
   };
 
   try {
-    const response = await calendar.events.insert({
+    console.log('Inserting calendar event with config:', {
       calendarId: config.google.calendarId,
+      eventSummary: event.summary,
+      startTime: event.start.dateTime,
+      endTime: event.end.dateTime
+    });
+    
+    const response = await calendar.events.insert({
+      calendarId: config.google.calendarId || 'primary',
       resource: event,
       sendNotifications: true
     });
+    
+    console.log('Calendar event created:', {
+      id: response.data.id,
+      htmlLink: response.data.htmlLink,
+      status: response.data.status
+    });
+    
     return response.data;
   } catch (error) {
-    console.error('Error creating Google Calendar event:', error);
+    console.error('Error creating Google Calendar event:', error.message);
+    if (error.code === 401) {
+      console.error('Authentication error - token may be expired or invalid');
+    } else if (error.code === 403) {
+      console.error('Permission denied - check Calendar API is enabled and scopes are correct');
+    } else if (error.code === 404) {
+      console.error('Calendar not found - check GOOGLE_CALENDAR_ID setting');
+    }
     throw error;
   }
 }
@@ -428,50 +457,71 @@ app.get('/auth/google/callback', async (req, res) => {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
     console.log('OAuth tokens obtained successfully');
+    console.log('Token details:', {
+      hasAccessToken: !!tokens.access_token,
+      hasRefreshToken: !!tokens.refresh_token,
+      expiryDate: tokens.expiry_date
+    });
     
     // Get user info
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
     const userInfo = await oauth2.userinfo.get();
-    console.log('User info retrieved:', userInfo.data.email);
+    console.log('User info retrieved:', userInfo.data.email, userInfo.data.name);
     
-    // Store user and tokens in Redis
     const userId = uuidv4();
+    const userData = {
+      id: userId,
+      email: userInfo.data.email,
+      name: userInfo.data.name,
+      google_tokens: tokens,
+      created_at: new Date().toISOString(),
+      last_login: new Date().toISOString()
+    };
     
+    // Save to memory store FIRST for immediate access
+    memoryStore.users.set(userInfo.data.email, userData);
+    memoryStore.latestUser = userInfo.data.email;
+    console.log('User saved to memory store');
+    
+    // Then save to Redis if available
     if (redis) {
-      // Save to Redis for persistence
-      const userData = {
-        id: userId,
-        email: userInfo.data.email,
-        name: userInfo.data.name,
-        google_tokens: tokens,
-        created_at: new Date().toISOString()
-      };
-      
-      await redis.set(`user:${userInfo.data.email}`, JSON.stringify(userData));
-      await redis.set('latest_user', userInfo.data.email); // Track latest user for calendar operations
-      console.log('User saved to Redis successfully');
+      try {
+        await redis.set(`user:${userInfo.data.email}`, JSON.stringify(userData));
+        await redis.set('latest_user', userInfo.data.email);
+        // Also store a session-linked user for better persistence
+        await redis.set(`session_user:${req.sessionID}`, userInfo.data.email, { ex: 7 * 24 * 60 * 60 });
+        console.log('User saved to Redis successfully');
+      } catch (redisErr) {
+        console.error('Redis save error (non-fatal):', redisErr.message);
+      }
     }
     
-    // Store in session
+    // Store complete user data in session
     req.session.user = {
       id: userId,
       email: userInfo.data.email,
       name: userInfo.data.name,
-      tokens: tokens
+      tokens: tokens,
+      authenticated: true,
+      loginTime: new Date().toISOString()
     };
+    
+    // Ensure session is marked as modified
+    req.session.touch();
     
     // Force session save before redirect
     req.session.save((saveErr) => {
       if (saveErr) {
         console.error('Session save error:', saveErr);
-      } else {
-        console.log('Session saved successfully for:', userInfo.data.email);
       }
-      res.redirect('/?auth=success');
+      console.log('Session saved, redirecting user:', userInfo.data.email);
+      // Add email to redirect for client-side handling
+      res.redirect('/?auth=success&user=' + encodeURIComponent(userInfo.data.email));
     });
   } catch (error) {
     console.error('Auth error:', error);
-    res.redirect('/?error=auth_failed');
+    console.error('Error details:', error.response?.data || error.message);
+    res.redirect('/?error=auth_failed&details=' + encodeURIComponent(error.message));
   }
 });
 
@@ -480,49 +530,90 @@ app.get('/auth/status', async (req, res) => {
   console.log('Auth status check - User in session:', req.session.user ? req.session.user.email : 'none');
   
   // Try to load from session first
-  if (req.session.user) {
-    res.json({
-      authenticated: true,
-      user: {
-        email: req.session.user.email,
-        name: req.session.user.name
-      }
-    });
-    return;
+  if (req.session.user && req.session.user.tokens) {
+    // Verify tokens are still valid
+    const tokens = req.session.user.tokens;
+    if (tokens.expiry_date && tokens.expiry_date > Date.now()) {
+      res.json({
+        authenticated: true,
+        user: {
+          email: req.session.user.email,
+          name: req.session.user.name
+        }
+      });
+      return;
+    }
   }
   
-  // If no session but we have Redis, try to load the latest user
+  // Try memory store next
+  if (memoryStore.latestUser) {
+    const userData = memoryStore.users.get(memoryStore.latestUser);
+    if (userData && userData.google_tokens) {
+      // Restore session from memory
+      req.session.user = {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        tokens: userData.google_tokens,
+        authenticated: true
+      };
+      
+      req.session.save((err) => {
+        if (err) console.error('Session restore from memory error:', err);
+        res.json({
+          authenticated: true,
+          user: {
+            email: userData.email,
+            name: userData.name
+          },
+          restored: true
+        });
+      });
+      return;
+    }
+  }
+  
+  // If no session or memory, try Redis
   if (redis) {
     try {
-      const latestUserEmail = await redis.get('latest_user');
-      if (latestUserEmail) {
-        const userData = await redis.get(`user:${latestUserEmail}`);
+      // First try session-linked user
+      const sessionUserEmail = await redis.get(`session_user:${req.sessionID}`);
+      let userEmail = sessionUserEmail || await redis.get('latest_user');
+      
+      if (userEmail) {
+        const userData = await redis.get(`user:${userEmail}`);
         if (userData) {
-          const user = JSON.parse(userData);
+          const user = typeof userData === 'string' ? JSON.parse(userData) : userData;
+          
+          // Save to memory store for faster access
+          memoryStore.users.set(user.email, user);
+          memoryStore.latestUser = user.email;
           
           // Restore session from Redis
           req.session.user = {
             id: user.id,
             email: user.email,
             name: user.name,
-            tokens: user.google_tokens
+            tokens: user.google_tokens,
+            authenticated: true
           };
           
           req.session.save((err) => {
-            if (err) console.error('Session restore error:', err);
+            if (err) console.error('Session restore from Redis error:', err);
             res.json({
               authenticated: true,
               user: {
                 email: user.email,
                 name: user.name
-              }
+              },
+              restored: true
             });
           });
           return;
         }
       }
     } catch (error) {
-      console.error('Error loading user from Redis:', error);
+      console.error('Error loading user from Redis:', error.message);
     }
   }
   
@@ -664,38 +755,64 @@ app.post('/api/reservations', async (req, res) => {
   let googleEventId = null;
   
   // Try to create Google Calendar event if user is authenticated
-  console.log('Creating reservation - Session user:', req.session.user ? req.session.user.email : 'none');
+  console.log('Creating reservation - checking for authenticated user...');
   
-  // Try to get tokens from Redis or session
+  // Try multiple sources for tokens
   let userTokens = null;
+  let userEmail = null;
   
-  if (redis) {
+  // 1. Try session first (most reliable)
+  if (req.session.user?.tokens) {
+    userTokens = req.session.user.tokens;
+    userEmail = req.session.user.email;
+    console.log('Using tokens from session for:', userEmail);
+  }
+  
+  // 2. Try memory store if no session
+  if (!userTokens && memoryStore.latestUser) {
+    const userData = memoryStore.users.get(memoryStore.latestUser);
+    if (userData && userData.google_tokens) {
+      userTokens = userData.google_tokens;
+      userEmail = userData.email;
+      console.log('Using tokens from memory store for:', userEmail);
+    }
+  }
+  
+  // 3. Try Redis as last resort
+  if (!userTokens && redis) {
     try {
-      // Get the latest authenticated user from Redis
       const latestUserEmail = await redis.get('latest_user');
       if (latestUserEmail) {
         const userData = await redis.get(`user:${latestUserEmail}`);
         if (userData) {
-          const user = JSON.parse(userData);
+          const user = typeof userData === 'string' ? JSON.parse(userData) : userData;
           userTokens = user.google_tokens;
-          console.log('Loaded tokens from Redis for:', user.email);
+          userEmail = user.email;
+          console.log('Using tokens from Redis for:', userEmail);
         }
       }
     } catch (error) {
-      console.error('Error loading user tokens from Redis:', error);
+      console.error('Error loading user tokens from Redis:', error.message);
     }
-  }
-  
-  // Fallback to session if Redis doesn't have tokens
-  if (!userTokens && req.session.user?.tokens) {
-    userTokens = req.session.user.tokens;
-    console.log('Using tokens from session');
   }
   
   if (userTokens) {
     try {
-      console.log('Setting OAuth credentials for calendar event creation');
+      console.log('Attempting to create Google Calendar event...');
+      console.log('Token status:', {
+        hasAccessToken: !!userTokens.access_token,
+        hasRefreshToken: !!userTokens.refresh_token,
+        isExpired: userTokens.expiry_date ? userTokens.expiry_date < Date.now() : 'unknown'
+      });
+      
+      // Set credentials
       oauth2Client.setCredentials(userTokens);
+      
+      // If token is expired and we have refresh token, it will auto-refresh
+      if (userTokens.refresh_token) {
+        console.log('Refresh token available for auto-refresh if needed');
+      }
+      
       const googleEvent = await createGoogleCalendarEvent(oauth2Client, {
         name,
         email,
@@ -704,15 +821,21 @@ app.post('/api/reservations', async (req, res) => {
         endTime,
         purpose
       });
+      
       googleEventId = googleEvent.id;
-      console.log('Google Calendar event created successfully:', googleEventId);
+      console.log('✅ Google Calendar event created successfully!');
+      console.log('Event ID:', googleEventId);
+      console.log('Event Link:', googleEvent.htmlLink);
     } catch (error) {
-      console.error('Failed to create Google Calendar event:', error.message);
-      console.error('Error details:', error);
-      // Continue without Google Calendar integration
+      console.error('❌ Failed to create Google Calendar event:', error.message);
+      if (error.response) {
+        console.error('API Error:', error.response.data);
+      }
+      // Continue without Google Calendar integration - don't fail the reservation
     }
   } else {
-    console.log('No authenticated user or tokens available - skipping calendar creation');
+    console.log('⚠️ No authenticated user found - reservation will be created without calendar event');
+    console.log('To enable calendar sync, click "Connect Google Calendar" button');
   }
   
   const reservation = {

@@ -14,22 +14,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // Check for auth callback
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('auth') === 'success') {
-        console.log('Auth successful, checking status...');
+        const userEmail = urlParams.get('user');
+        console.log('Auth successful for:', userEmail || 'unknown');
+        
+        // Immediately update UI with success
+        if (userEmail) {
+            isGoogleAuthenticated = true;
+            currentUser = { email: decodeURIComponent(userEmail) };
+            updateAuthButton();
+        }
+        
         // Show success message
-        showSuccessModal('Google Calendar connected successfully!');
-        // Remove auth parameter from URL
+        showSuccessModal('✅ Google Calendar connected successfully!');
+        
+        // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
-        // Force auth status check after a short delay to ensure session is saved
+        
+        // Verify auth status from server
         setTimeout(async () => {
             await checkAuthStatus();
-            // Double-check after another delay (Vercel session propagation)
-            setTimeout(() => {
-                checkAuthStatus();
-            }, 1000);
-        }, 500);
+            // Show additional confirmation
+            if (isGoogleAuthenticated) {
+                console.log('Calendar sync is now active for all reservations!');
+            }
+        }, 100);
     }
     if (urlParams.get('error') === 'auth_failed') {
-        alert('Failed to connect Google Calendar. Please try again.');
+        const details = urlParams.get('details');
+        alert('❌ Failed to connect Google Calendar. ' + (details ? 'Error: ' + decodeURIComponent(details) : 'Please try again.'));
         window.history.replaceState({}, document.title, window.location.pathname);
     }
     
@@ -44,35 +56,75 @@ document.addEventListener('DOMContentLoaded', () => {
 // Google Auth
 async function checkAuthStatus() {
     try {
-        // Check localStorage first for auth state
-        const savedAuth = localStorage.getItem('googleAuth');
-        if (savedAuth) {
-            const authData = JSON.parse(savedAuth);
-            isGoogleAuthenticated = true;
-            currentUser = authData;
-            updateAuthButton();
+        const response = await fetch('/auth/status', {
+            method: 'GET',
+            credentials: 'include', // CRITICAL: Include cookies for session
+            headers: {
+                'Accept': 'application/json',
+            }
+        });
+        
+        if (!response.ok) {
+            console.error('Auth status check failed:', response.status);
+            return;
         }
         
-        const response = await fetch('/auth/status', {
-            credentials: 'include' // Ensure cookies are sent
-        });
         const data = await response.json();
-        
         console.log('Auth status response:', data);
         
         isGoogleAuthenticated = data.authenticated;
         currentUser = data.user;
         
-        // Save to localStorage if authenticated
+        // Update localStorage for client-side persistence
         if (data.authenticated && data.user) {
-            localStorage.setItem('googleAuth', JSON.stringify(data.user));
-        } else if (!data.authenticated) {
+            localStorage.setItem('googleAuth', JSON.stringify({
+                email: data.user.email,
+                name: data.user.name,
+                timestamp: new Date().toISOString()
+            }));
+            console.log('✅ User authenticated:', data.user.email);
+            
+            // If this was a restored session, show a message
+            if (data.restored) {
+                console.log('Session restored from server');
+            }
+        } else {
             localStorage.removeItem('googleAuth');
+            console.log('❌ Not authenticated');
         }
         
         updateAuthButton();
+        
+        // If authenticated, ensure we're showing the right UI
+        if (isGoogleAuthenticated) {
+            // Remove any auth success messages from URL
+            if (window.location.search.includes('auth=success')) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }
     } catch (error) {
         console.error('Error checking auth status:', error);
+        // Try to use localStorage as fallback
+        const savedAuth = localStorage.getItem('googleAuth');
+        if (savedAuth) {
+            try {
+                const authData = JSON.parse(savedAuth);
+                // Only use if less than 7 days old
+                const savedTime = new Date(authData.timestamp);
+                const now = new Date();
+                const daysDiff = (now - savedTime) / (1000 * 60 * 60 * 24);
+                
+                if (daysDiff < 7) {
+                    console.log('Using cached auth data');
+                    isGoogleAuthenticated = true;
+                    currentUser = authData;
+                    updateAuthButton();
+                }
+            } catch (e) {
+                console.error('Invalid cached auth data');
+                localStorage.removeItem('googleAuth');
+            }
+        }
     }
 }
 
@@ -112,21 +164,7 @@ async function handleGoogleAuth() {
     }
 }
 
-// Check for auth callback
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get('auth') === 'success') {
-    // Remove query params from URL
-    window.history.replaceState({}, document.title, '/');
-    checkAuthStatus();
-    
-    // Show success message
-    setTimeout(() => {
-        alert('✅ Google Calendar connected successfully!');
-    }, 100);
-} else if (urlParams.get('error') === 'auth_failed') {
-    window.history.replaceState({}, document.title, '/');
-    alert('❌ Failed to connect Google Calendar. Please try again.');
-}
+// Removed duplicate auth callback check - already handled in DOMContentLoaded
 
 // Date Selector
 function initializeDateSelector() {
