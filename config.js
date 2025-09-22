@@ -34,7 +34,11 @@ module.exports = {
     },
     redis: {
         url: process.env.dataforroom5_REDIS_URL || process.env.REDIS_URL,
-        restApiUrl: process.env.dataforroom5_KV_REST_API_URL,
-        restApiToken: process.env.dataforroom5_KV_REST_API_TOKEN
+        restApiUrl: process.env.dataforroom5_KV_REST_API_URL || 
+                    process.env.KV_REST_API_URL || 
+                    process.env.UPSTASH_REDIS_REST_URL,
+        restApiToken: process.env.dataforroom5_KV_REST_API_TOKEN || 
+                      process.env.KV_REST_API_TOKEN || 
+                      process.env.UPSTASH_REDIS_REST_TOKEN
     }
 };

@@ -15,13 +15,47 @@ const PORT = config.server.port;
 
 // Initialize Upstash Redis client
 let redis = null;
+
+// Debug environment variables (remove in production)
+console.log('Redis Config Debug:');
+console.log('- restApiUrl:', config.redis.restApiUrl ? 'Set' : 'Not set');
+console.log('- restApiToken:', config.redis.restApiToken ? 'Set (length: ' + config.redis.restApiToken.length + ')' : 'Not set');
+
+// Check for all possible Redis env var names
+const possibleEnvVars = [
+  'dataforroom5_KV_REST_API_URL',
+  'dataforroom5_KV_REST_API_TOKEN',
+  'KV_REST_API_URL',
+  'KV_REST_API_TOKEN',
+  'UPSTASH_REDIS_REST_URL',
+  'UPSTASH_REDIS_REST_TOKEN'
+];
+
+console.log('Environment variables check:');
+possibleEnvVars.forEach(varName => {
+  console.log(`- ${varName}:`, process.env[varName] ? 'Present' : 'Missing');
+});
+
 try {
-  if (config.redis.restApiUrl && config.redis.restApiToken) {
+  // Try different approaches based on what's available
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    redis = new Redis({
+      url: process.env.KV_REST_API_URL,
+      token: process.env.KV_REST_API_TOKEN
+    });
+    console.log('Connected to Upstash Redis using KV_REST_API vars');
+  } else if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN
+    });
+    console.log('Connected to Upstash Redis using UPSTASH_REDIS_REST vars');
+  } else if (config.redis.restApiUrl && config.redis.restApiToken) {
     redis = new Redis({
       url: config.redis.restApiUrl,
       token: config.redis.restApiToken
     });
-    console.log('Connected to Upstash Redis successfully');
+    console.log('Connected to Upstash Redis using config vars');
   } else {
     console.log('Redis credentials not found, using memory storage (development only)');
   }
@@ -439,6 +473,13 @@ app.post('/auth/logout', async (req, res) => {
   });
 });
 
+// In-memory storage fallback
+const memoryStore = {
+  reservations: new Map(),
+  users: new Map(),
+  latestUser: null
+};
+
 // Get all reservations
 app.get('/api/reservations', async (req, res) => {
   const { date } = req.query;
@@ -447,34 +488,47 @@ app.get('/api/reservations', async (req, res) => {
     let reservations = [];
     
     if (redis) {
-      // Get all reservation keys from Redis
-      const keys = await redis.keys('reservation:*');
-      
-      if (keys && keys.length > 0) {
-        // Get all reservations
-        for (const key of keys) {
-          const data = await redis.get(key);
-          if (data) {
-            const reservation = JSON.parse(data);
-            if (!date || reservation.date === date) {
-              reservations.push(reservation);
+      try {
+        // Get all reservation keys from Redis
+        const keys = await redis.keys('reservation:*');
+        
+        if (keys && keys.length > 0) {
+          // Get all reservations
+          for (const key of keys) {
+            const data = await redis.get(key);
+            if (data) {
+              const reservation = typeof data === 'string' ? JSON.parse(data) : data;
+              if (!date || reservation.date === date) {
+                reservations.push(reservation);
+              }
             }
           }
         }
+      } catch (redisError) {
+        console.error('Redis error, using memory fallback:', redisError.message);
+        // Fall back to memory store
+        reservations = Array.from(memoryStore.reservations.values()).filter(
+          r => !date || r.date === date
+        );
       }
-      
-      // Sort by date and start time
-      reservations.sort((a, b) => {
-        const dateCompare = a.date.localeCompare(b.date);
-        if (dateCompare !== 0) return dateCompare;
-        return a.startTime.localeCompare(b.startTime);
-      });
+    } else {
+      // Use memory store if Redis not available
+      reservations = Array.from(memoryStore.reservations.values()).filter(
+        r => !date || r.date === date
+      );
     }
+    
+    // Sort by date and start time
+    reservations.sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) return dateCompare;
+      return a.startTime.localeCompare(b.startTime);
+    });
     
     res.json(reservations);
   } catch (error) {
     console.error('Error fetching reservations:', error);
-    res.status(500).json({ error: error.message });
+    res.json([]); // Return empty array instead of error
   }
 });
 
@@ -601,10 +655,19 @@ app.post('/api/reservations', async (req, res) => {
     created_at: new Date().toISOString()
   };
   
-  // Save to Redis if available
+  // Save to Redis if available, otherwise use memory store
   if (redis) {
-    await redis.set(`reservation:${id}`, JSON.stringify(reservation));
-    console.log('Reservation saved to Redis:', id);
+    try {
+      await redis.set(`reservation:${id}`, JSON.stringify(reservation));
+      console.log('Reservation saved to Redis:', id);
+    } catch (redisError) {
+      console.error('Redis save error, using memory store:', redisError.message);
+      memoryStore.reservations.set(id, reservation);
+    }
+  } else {
+    // Use memory store if Redis not available
+    memoryStore.reservations.set(id, reservation);
+    console.log('Reservation saved to memory store:', id);
   }
   
   // Broadcast to all connected clients
